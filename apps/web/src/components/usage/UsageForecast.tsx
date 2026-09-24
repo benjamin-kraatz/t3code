@@ -120,47 +120,54 @@ export function UsageForecast({
         </div>
 
         {providers.length > 0 ? (
-          // Hovering the row opens what the pace still adds after each projection,
-          // the same quantity the hatched tail of the bar draws. The width animates
-          // through a grid track so neighbouring chips glide rather than jump.
-          <ul className="group/forecast-row flex flex-wrap items-center gap-x-5 gap-y-1">
-            {providers.map(({ provider, value, soFar: providerSoFar }) => (
-              <li key={provider} className="flex items-center gap-1.5 text-xs">
-                <span
-                  aria-hidden
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: PROVIDER_PRESENTATION[provider].color }}
-                />
-                <span className="text-muted-foreground">
-                  {PROVIDER_PRESENTATION[provider].label}
-                </span>
-                <span className="flex items-center tabular-nums">
-                  <span className="font-medium text-foreground">
-                    {format(value)}
-                    <span className="sr-only">
-                      {" "}
-                      projected, {format(value - providerSoFar)} still to come
-                    </span>
-                  </span>
+          // Hovering a provider opens what the pace still adds after its
+          // projection, the same quantity the hatched tail of the bar draws, as a
+          // pill in that provider's colour. The width animates through a grid
+          // track so neighbouring chips glide rather than jump.
+          <ul className="flex flex-wrap items-center gap-x-5 gap-y-1">
+            {providers.map(({ provider, value, soFar: providerSoFar }) => {
+              const color = PROVIDER_PRESENTATION[provider].color;
+              return (
+                <li
+                  key={provider}
+                  className="group/forecast-chip flex items-center gap-1.5 text-xs"
+                >
                   <span
                     aria-hidden
-                    className="grid grid-cols-[0fr] transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:grid-cols-[1fr]"
-                  >
-                    <span className="min-w-0 overflow-hidden whitespace-nowrap">
-                      <span className="inline-block ps-1 text-muted-foreground translate-x-1 opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:translate-x-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-none">
-                        +{format(value - providerSoFar)}
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="text-muted-foreground">
+                    {PROVIDER_PRESENTATION[provider].label}
+                  </span>
+                  <span className="flex items-center tabular-nums">
+                    <span className="font-medium text-foreground">
+                      {format(value)}
+                      <span className="sr-only">
+                        {" "}
+                        projected, {format(value - providerSoFar)} still to come
+                      </span>
+                    </span>
+                    <span
+                      aria-hidden
+                      className="grid grid-cols-[0fr] transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-chip:grid-cols-[1fr]"
+                    >
+                      <span className="min-w-0 overflow-hidden whitespace-nowrap py-px">
+                        <span
+                          className="ms-1.5 inline-block rounded-full px-1.5 text-[11px] font-medium leading-4 translate-x-1 opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-chip:translate-x-0 group-hover/forecast-chip:opacity-100 group-hover/forecast-chip:blur-none"
+                          style={{
+                            color,
+                            backgroundColor: `color-mix(in oklab, ${color} 14%, transparent)`,
+                          }}
+                        >
+                          +{format(value - providerSoFar)} to come
+                        </span>
                       </span>
                     </span>
                   </span>
-                </span>
-              </li>
-            ))}
-            <li
-              aria-hidden
-              className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-300 motion-reduce:transition-none group-hover/forecast-row:opacity-100"
-            >
-              + still to come this month
-            </li>
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </div>
