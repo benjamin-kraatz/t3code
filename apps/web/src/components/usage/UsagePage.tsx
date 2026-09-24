@@ -40,6 +40,7 @@ import {
   makeMonthToDateWindow,
   makeWindow,
   projectMonthEndTokens,
+  projectMonthEndValue,
 } from "@t3tools/shared/usageFormat";
 import { Button, InlineButton } from "../ui/button";
 import {
@@ -130,9 +131,14 @@ export function UsagePage() {
       ? window
       : monthSelection.window;
   const monthUsage = useUsage(monthQuery, selectedEnvironmentIds);
-  const monthTokens = monthUsage.merged.daily
-    .filter((period) => period.day >= monthSelection.window.sinceDay)
-    .reduce((total, period) => total + period.totalTokens, 0);
+  const monthPeriods = monthUsage.merged.daily.filter(
+    (period) => period.day >= monthSelection.window.sinceDay,
+  );
+  const monthTokens = monthPeriods.reduce((total, period) => total + period.totalTokens, 0);
+  const monthCostUsd = monthPeriods.reduce((total, period) => total + period.costUsd, 0);
+  const hasMonthUsage =
+    !monthUsage.isPending &&
+    monthUsage.selectedEnvironments.some((environment) => environment.summary !== null);
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const sourceMessages = [
     ...new Set(
@@ -526,16 +532,19 @@ export function UsagePage() {
                 <section className="flex flex-col gap-2">
                   <h2 className="text-sm font-medium text-foreground">Totals</h2>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
-                    {!monthUsage.isPending &&
-                    monthUsage.selectedEnvironments.some(
-                      (environment) => environment.summary !== null,
-                    ) ? (
-                      <Metric
-                        label="Projected month-end tokens"
-                        value={formatTokens(
-                          projectMonthEndTokens(monthTokens, monthSelection.asOf),
-                        )}
-                      />
+                    {hasMonthUsage ? (
+                      <>
+                        <Metric
+                          label="Projected month-end tokens"
+                          value={formatTokens(
+                            projectMonthEndTokens(monthTokens, monthSelection.asOf),
+                          )}
+                        />
+                        <Metric
+                          label="Projected month-end API cost"
+                          value={formatUsd(projectMonthEndValue(monthCostUsd, monthSelection.asOf))}
+                        />
+                      </>
                     ) : null}
                     <Metric label="Processed tokens" value={formatTokens(merged.totalTokens)} />
                     <Metric label="Cached input" value={formatTokens(merged.cachedInputTokens)} />

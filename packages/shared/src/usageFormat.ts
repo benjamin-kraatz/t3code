@@ -258,10 +258,14 @@ export function makeMonthToDateWindow(now = new Date()): UsageSummaryInput {
 }
 
 /** Extends the observed month-to-date rate through the last day of the month. */
-export function projectMonthEndTokens(totalTokens: number, now = new Date()): number {
+export function projectMonthEndValue(value: number, now = new Date()): number {
   const day = makeMonthToDateWindow(now).untilDay;
   const [year, month, dayOfMonth] = day.split("-").map(Number);
-  if (year === undefined || month === undefined || dayOfMonth === undefined) return totalTokens;
+  if (year === undefined || month === undefined || dayOfMonth === undefined) return value;
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return Math.round((totalTokens * daysInMonth) / dayOfMonth);
+  return (value * daysInMonth) / dayOfMonth;
+}
+
+export function projectMonthEndTokens(totalTokens: number, now = new Date()): number {
+  return Math.round(projectMonthEndValue(totalTokens, now));
 }

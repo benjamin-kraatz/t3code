@@ -19,6 +19,7 @@ import {
   makeMonthToDateWindow,
   makeWindow,
   projectMonthEndTokens,
+  projectMonthEndValue,
 } from "@t3tools/shared/usageFormat";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
@@ -108,9 +109,14 @@ export function UsageRouteScreen() {
       ? window
       : monthSelection.window;
   const monthUsage = useUsage(monthQuery, selectedEnvironmentIds);
-  const monthTokens = monthUsage.merged.daily
-    .filter((period) => period.day >= monthSelection.window.sinceDay)
-    .reduce((total, period) => total + period.totalTokens, 0);
+  const monthPeriods = monthUsage.merged.daily.filter(
+    (period) => period.day >= monthSelection.window.sinceDay,
+  );
+  const monthTokens = monthPeriods.reduce((total, period) => total + period.totalTokens, 0);
+  const monthCostUsd = monthPeriods.reduce((total, period) => total + period.costUsd, 0);
+  const hasMonthUsage =
+    !monthUsage.isPending &&
+    monthUsage.selectedEnvironments.some((environment) => environment.summary !== null);
   const environmentLabels = useMemo(
     () =>
       new Map(environments.map((environment) => [environment.environmentId, environment.label])),
@@ -372,12 +378,10 @@ export function UsageRouteScreen() {
                     merged={merged}
                     isPast24Hours={isPast24Hours}
                     projectedTokens={
-                      monthUsage.isPending ||
-                      !monthUsage.selectedEnvironments.some(
-                        (environment) => environment.summary !== null,
-                      )
-                        ? null
-                        : projectMonthEndTokens(monthTokens, monthSelection.asOf)
+                      hasMonthUsage ? projectMonthEndTokens(monthTokens, monthSelection.asOf) : null
+                    }
+                    projectedCostUsd={
+                      hasMonthUsage ? projectMonthEndValue(monthCostUsd, monthSelection.asOf) : null
                     }
                   />
                   <ModelsSection merged={merged} />
@@ -524,6 +528,7 @@ function TotalsSection(props: {
   readonly merged: MergedUsage;
   readonly isPast24Hours: boolean;
   readonly projectedTokens: number | null;
+  readonly projectedCostUsd: number | null;
 }) {
   const { merged } = props;
   const activePeriods = (props.isPast24Hours ? merged.hourly : merged.daily).filter(
@@ -540,6 +545,13 @@ function TotalsSection(props: {
           <MetricCell
             label="Projected month-end tokens"
             value={formatTokens(props.projectedTokens)}
+            detail="At this month's daily pace"
+          />
+        ) : null}
+        {props.projectedCostUsd !== null ? (
+          <MetricCell
+            label="Projected month-end API cost"
+            value={formatUsd(props.projectedCostUsd)}
             detail="At this month's daily pace"
           />
         ) : null}
