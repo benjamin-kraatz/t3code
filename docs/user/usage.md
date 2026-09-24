@@ -2,7 +2,7 @@
 
 ## Understand your usage
 
-**Usage** combines Codex, Claude Code, and Grok Build session history from your connected
+**Usage** combines Codex, Claude Code, Grok Build, OpenCode, Antigravity, and Cursor history from your connected
 environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
 cost. These estimates are not your subscription bill.
 
@@ -14,6 +14,15 @@ the account's home setting or its `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `GROK_HO
 variable. Use absolute paths or `~/` paths in the account's environment settings; relative
 environment paths depend on each project's working directory and cannot be reliably discovered
 by Usage. Accounts sharing a history directory count once.
+
+OpenCode reads its SQLite database and older JSON history. Antigravity reads local conversation
+databases, including T3-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the
+server to read a different data directory; comma-separated paths read multiple directories.
+
+Cursor reads account usage from Cursor's dashboard API using the CLI login saved on the server.
+This includes headless T3 sessions and desktop usage across machines; the same account counts
+once across connected environments. Without an accessible file-based CLI login, T3 shows a
+notice instead of incomplete local totals. T3 does not estimate missing tokens from conversation text.
 
 On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
