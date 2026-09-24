@@ -120,8 +120,9 @@ export function UsageForecast({
         </div>
 
         {providers.length > 0 ? (
-          // Hovering any provider figure swaps the whole row to month-to-date,
-          // so the values stay comparable with each other and with "So far" above.
+          // Hovering the row opens a month-to-date figure beside each projection,
+          // read as "so far → month end". The width animates through a grid track
+          // so neighbouring chips glide rather than jump.
           <ul className="group/forecast-row flex flex-wrap items-center gap-x-5 gap-y-1">
             {providers.map(({ provider, value, soFar: providerSoFar }) => (
               <li key={provider} className="flex items-center gap-1.5 text-xs">
@@ -133,26 +134,31 @@ export function UsageForecast({
                 <span className="text-muted-foreground">
                   {PROVIDER_PRESENTATION[provider].label}
                 </span>
-                <span className="grid font-medium text-foreground tabular-nums *:col-start-1 *:row-start-1">
+                <span className="flex items-center tabular-nums">
                   <span
                     aria-hidden
-                    className="text-end transition-[opacity,translate,filter] duration-200 motion-reduce:transition-none group-hover/forecast-row:-translate-y-1 group-hover/forecast-row:opacity-0 group-hover/forecast-row:blur-[2px]"
+                    className="grid grid-cols-[0fr] transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:grid-cols-[1fr]"
                   >
-                    {format(value)}
+                    <span className="min-w-0 overflow-hidden whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 pe-1 text-muted-foreground -translate-x-1 opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:translate-x-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-none">
+                        {format(providerSoFar)}
+                        <span className="text-muted-foreground/60">→</span>
+                      </span>
+                    </span>
                   </span>
-                  <span className="translate-y-1 text-end opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-200 motion-reduce:transition-none group-hover/forecast-row:translate-y-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-none">
+                  <span className="font-medium text-foreground">
                     <span className="sr-only">{format(providerSoFar)} so far, </span>
-                    <span aria-hidden>{format(providerSoFar)}</span>
+                    {format(value)}
+                    <span className="sr-only"> projected</span>
                   </span>
-                  <span className="sr-only">{format(value)} projected</span>
                 </span>
               </li>
             ))}
             <li
               aria-hidden
-              className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-200 motion-reduce:transition-none group-hover/forecast-row:opacity-100"
+              className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-300 motion-reduce:transition-none group-hover/forecast-row:opacity-100"
             >
-              so far
+              so far → month end
             </li>
           </ul>
         ) : null}
