@@ -4,7 +4,13 @@
  *
  * @module usageFormat
  */
-import { UsageDay, type UsageResolution, type UsageSummaryInput } from "@t3tools/contracts";
+import {
+  UsageDay,
+  type UsageProviderKind,
+  type UsageResolution,
+  type UsageSummaryInput,
+} from "@t3tools/contracts";
+import type { DailyTotals } from "./usageMerge.ts";
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -268,4 +274,31 @@ export function projectMonthEndValue(value: number, now = new Date()): number {
 
 export function projectMonthEndTokens(totalTokens: number, now = new Date()): number {
   return Math.round(projectMonthEndValue(totalTokens, now));
+}
+
+export function projectMonthEndProviders(
+  periods: readonly DailyTotals[],
+  now = new Date(),
+): ReadonlyMap<UsageProviderKind, { readonly totalTokens: number; readonly costUsd: number }> {
+  const totals = new Map<UsageProviderKind, { totalTokens: number; costUsd: number }>();
+  for (const period of periods) {
+    for (const [provider, usage] of period.byProvider) {
+      const current = totals.get(provider) ?? { totalTokens: 0, costUsd: 0 };
+      current.totalTokens += usage.totalTokens;
+      current.costUsd += usage.costUsd;
+      totals.set(provider, current);
+    }
+  }
+  return new Map(
+    [...totals].map(
+      ([provider, usage]) =>
+        [
+          provider,
+          {
+            totalTokens: projectMonthEndTokens(usage.totalTokens, now),
+            costUsd: projectMonthEndValue(usage.costUsd, now),
+          },
+        ] as const,
+    ),
+  );
 }

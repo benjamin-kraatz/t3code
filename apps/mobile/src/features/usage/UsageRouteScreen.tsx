@@ -1,5 +1,5 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
-import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
+import { EnvironmentId, USAGE_CONTRACT_VERSION, type UsageProviderKind } from "@t3tools/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import {
   isCompatibleUsageContractVersion,
@@ -18,6 +18,7 @@ import {
   formatUsd,
   makeMonthToDateWindow,
   makeWindow,
+  projectMonthEndProviders,
   projectMonthEndTokens,
   projectMonthEndValue,
 } from "@t3tools/shared/usageFormat";
@@ -41,7 +42,7 @@ import { LimitsPaceWarningToggle } from "./LimitsPaceBanner";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
 import type { UsageChartMetric } from "./usageChartData";
-import { PROVIDER_LABEL, useProviderColors } from "./usageProviders";
+import { PROVIDER_LABEL, PROVIDER_ORDER, useProviderColors } from "./usageProviders";
 
 type UsageTab = "usage" | "limits";
 const TAB_OPTIONS = [
@@ -117,6 +118,7 @@ export function UsageRouteScreen() {
   const hasMonthUsage =
     !monthUsage.isPending &&
     monthUsage.selectedEnvironments.some((environment) => environment.summary !== null);
+  const projectedProviders = projectMonthEndProviders(monthPeriods, monthSelection.asOf);
   const environmentLabels = useMemo(
     () =>
       new Map(environments.map((environment) => [environment.environmentId, environment.label])),
@@ -368,7 +370,12 @@ export function UsageRouteScreen() {
                     isPast24Hours={isPast24Hours}
                     timeZone={window.timeZone}
                   />
-                  <ProviderSection merged={merged} metric={metric} />
+                  <ProviderSection
+                    merged={merged}
+                    metric={metric}
+                    hasMonthUsage={hasMonthUsage}
+                    projectedProviders={projectedProviders}
+                  />
                   <UsageProjectsSection
                     merged={merged}
                     metric={metric}
@@ -471,52 +478,76 @@ function ChartCard(props: {
 function ProviderSection(props: {
   readonly merged: MergedUsage;
   readonly metric: UsageChartMetric;
+  readonly hasMonthUsage: boolean;
+  readonly projectedProviders: ReadonlyMap<
+    UsageProviderKind,
+    { readonly totalTokens: number; readonly costUsd: number }
+  >;
 }) {
   const { merged, metric } = props;
   const colors = useProviderColors();
-  if (merged.providers.length === 0) return null;
+  const currentProviders = new Map(
+    merged.providers.map((provider) => [provider.provider, provider]),
+  );
 
   // Ranked by whatever the toggle is showing, so the rows always descend.
   // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023 method.
-  const ordered = [...merged.providers].sort((a, b) =>
-    metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
-  );
+  const ordered = PROVIDER_ORDER.filter(
+    (provider) =>
+      currentProviders.has(provider) ||
+      (props.hasMonthUsage && props.projectedProviders.has(provider)),
+  ).sort((a, b) => {
+    const first = currentProviders.get(a);
+    const second = currentProviders.get(b);
+    return metric === "cost"
+      ? (second?.costUsd ?? 0) - (first?.costUsd ?? 0)
+      : (second?.totalTokens ?? 0) - (first?.totalTokens ?? 0);
+  });
+  if (ordered.length === 0) return null;
 
   return (
     <SettingsSection title="Providers">
       {ordered.map((provider, index) => {
-        const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+        const current = currentProviders.get(provider);
+        const projected = props.hasMonthUsage ? props.projectedProviders.get(provider) : undefined;
+        const share = metric === "cost" ? (current?.costShare ?? 0) : (current?.tokenShare ?? 0);
         return (
           <View
-            key={provider.provider}
+            key={provider}
             className={index === 0 ? "gap-2 p-4" : "gap-2 border-t border-border-subtle p-4"}
           >
             <View className="flex-row items-baseline justify-between gap-3">
               <View className="flex-row items-center gap-2">
                 <View
                   className="size-2.5 rounded-full"
-                  style={{ backgroundColor: colors[provider.provider] }}
+                  style={{ backgroundColor: colors[provider] }}
                 />
-                <Text className="text-lg text-foreground">{PROVIDER_LABEL[provider.provider]}</Text>
+                <Text className="text-lg text-foreground">{PROVIDER_LABEL[provider]}</Text>
               </View>
               <Text className="text-lg tabular-nums text-foreground">
                 {metric === "cost"
-                  ? formatUsd(provider.costUsd)
-                  : formatTokens(provider.totalTokens)}
+                  ? formatUsd(current?.costUsd ?? 0)
+                  : formatTokens(current?.totalTokens ?? 0)}
               </Text>
             </View>
             <View className="h-1 flex-row overflow-hidden rounded-full bg-subtle">
               <View
                 className="h-full rounded-full"
-                style={{ flex: share, backgroundColor: colors[provider.provider] }}
+                style={{ flex: share, backgroundColor: colors[provider] }}
               />
               <View style={{ flex: 1 - share }} />
             </View>
             <Text className="text-sm text-foreground-muted">
               {metric === "cost"
-                ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
-                : `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`}
+                ? `${formatPercent(share)} of cost · ${formatTokens(current?.totalTokens ?? 0)} tokens`
+                : `${formatPercent(share)} of tokens · ${formatUsd(current?.costUsd ?? 0)}`}
             </Text>
+            {projected ? (
+              <Text className="text-sm text-foreground-muted">
+                Projected month end · {formatTokens(projected.totalTokens)} tokens ·{" "}
+                {formatUsd(projected.costUsd)} API cost
+              </Text>
+            ) : null}
           </View>
         );
       })}

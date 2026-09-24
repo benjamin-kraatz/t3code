@@ -39,6 +39,7 @@ import {
   formatUsd,
   makeMonthToDateWindow,
   makeWindow,
+  projectMonthEndProviders,
   projectMonthEndTokens,
   projectMonthEndValue,
 } from "@t3tools/shared/usageFormat";
@@ -139,6 +140,7 @@ export function UsagePage() {
   const hasMonthUsage =
     !monthUsage.isPending &&
     monthUsage.selectedEnvironments.some((environment) => environment.summary !== null);
+  const projectedProviders = projectMonthEndProviders(monthPeriods, monthSelection.asOf);
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const sourceMessages = [
     ...new Set(
@@ -184,6 +186,10 @@ export function UsagePage() {
     [breakdown, merged.models, metric],
   );
   const activeProviders = useMemo(() => providersWithUsage(merged.providers), [merged.providers]);
+  const providerRows = PROVIDER_ORDER.filter(
+    (provider) =>
+      activeProviders.includes(provider) || (hasMonthUsage && projectedProviders.has(provider)),
+  );
   const timeValueColumnWidth = `${60 / (activeProviders.length + 2)}%`;
 
   const selectWindow = (days: number) => {
@@ -465,8 +471,11 @@ export function UsagePage() {
                       </span>
                     </div>
 
-                    {activeProviders.map((provider) => {
+                    {providerRows.map((provider) => {
                       const totals = merged.providers.find((entry) => entry.provider === provider);
+                      const projected = hasMonthUsage
+                        ? projectedProviders.get(provider)
+                        : undefined;
                       const share =
                         metric === "cost" ? (totals?.costShare ?? 0) : (totals?.tokenShare ?? 0);
                       const providerSessions = totals?.sessions ?? 0;
@@ -505,6 +514,12 @@ export function UsagePage() {
                               ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
                               : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`}
                           </span>
+                          {projected ? (
+                            <span className="text-xs text-muted-foreground tabular-nums">
+                              Projected month end · {formatTokens(projected.totalTokens)} tokens ·{" "}
+                              {formatUsd(projected.costUsd)} API cost
+                            </span>
+                          ) : null}
                         </div>
                       );
                     })}

@@ -11,6 +11,7 @@ the average daily pace so far. The cost is an API-equivalent estimate and exclud
 records; it is not your subscription bill. Both projections use the selected environments and
 remain rough estimates, especially early in the month or when an environment has incomplete
 history. The period control still applies to the other usage totals and charts.
+Provider rows show the same month-end token and API cost projections for each provider.
 
 On mobile, **By project** splits the same totals by the folder each session ran in. Folders that
 aren't T3 projects appear as **Outside T3**. Antigravity, Cursor, and history from older servers
