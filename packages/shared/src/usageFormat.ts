@@ -255,6 +255,26 @@ export function makeWindow(
 }
 
 /** A daily usage window covering the current calendar month in the viewer's zone. */
+/** Period choices the Usage tab offers: rolling day counts, or the calendar month so far. */
+export type UsageWindowKey = 1 | 7 | 30 | 90 | "month";
+export const USAGE_WINDOW_KEYS: readonly UsageWindowKey[] = [1, 7, 30, 90, "month"];
+
+export function isUsageWindowKey(value: unknown): value is UsageWindowKey {
+  return USAGE_WINDOW_KEYS.some((key) => key === value);
+}
+
+/** Toggle values arrive as strings; map them back to a period key. */
+export function parseUsageWindowKey(value: string): UsageWindowKey | null {
+  const key = value === "month" ? value : Number(value);
+  return isUsageWindowKey(key) ? key : null;
+}
+
+/** The single day range is hourly so the chart shows a shape rather than one bar. */
+export function makeUsageWindow(key: UsageWindowKey, now = new Date()): UsageSummaryInput {
+  if (key === "month") return makeMonthToDateWindow(now);
+  return makeWindow(key, now, key === 1 ? "hour" : "day");
+}
+
 export function makeMonthToDateWindow(now = new Date()): UsageSummaryInput {
   const window = makeWindow(1, now);
   return {

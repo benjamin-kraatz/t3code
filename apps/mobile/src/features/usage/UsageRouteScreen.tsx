@@ -17,7 +17,8 @@ import {
   formatTokens,
   formatUsd,
   makeMonthToDateWindow,
-  makeWindow,
+  makeUsageWindow,
+  type UsageWindowKey,
 } from "@t3tools/shared/usageFormat";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
@@ -55,7 +56,12 @@ const WINDOW_OPTIONS = [
   { value: 7, label: "7d", accessibilityLabel: "Past 7 days" },
   { value: 30, label: "30d", accessibilityLabel: "Past 30 days" },
   { value: 90, label: "90d", accessibilityLabel: "Past 90 days" },
-] as const;
+  { value: "month", label: "Month", accessibilityLabel: "This month to date" },
+] as const satisfies readonly {
+  value: UsageWindowKey;
+  label: string;
+  accessibilityLabel: string;
+}[];
 
 const METRIC_OPTIONS = [
   { value: "cost", label: "Cost" },
@@ -87,8 +93,8 @@ export function UsageRouteScreen() {
   const { tab } = selection;
   const setTab = (tab: UsageTab) => setSelection({ params: route.params, tab });
   const [windowSelection, setWindowSelection] = useState(() => ({
-    days: 30,
-    window: makeWindow(30),
+    days: 30 as UsageWindowKey,
+    window: makeUsageWindow(30),
   }));
   const [monthSelection, setMonthSelection] = useState(() => {
     const asOf = new Date();
@@ -164,16 +170,13 @@ export function UsageRouteScreen() {
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const refreshingRef = useRef(false);
   const showingLimits = tab === "limits";
-  const selectWindow = (days: number) => {
-    setWindowSelection({
-      days,
-      window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
-    });
+  const selectWindow = (days: UsageWindowKey) => {
+    setWindowSelection({ days, window: makeUsageWindow(days) });
   };
   const refreshWindow = () => {
     if (refreshingRef.current) return;
-    const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     const asOf = new Date();
+    const nextWindow = makeUsageWindow(windowDays, asOf);
     const nextMonthWindow = makeMonthToDateWindow(asOf);
     setMonthSelection({ asOf, window: nextMonthWindow });
     if (

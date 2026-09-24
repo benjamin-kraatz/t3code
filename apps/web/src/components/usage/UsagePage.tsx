@@ -38,7 +38,9 @@ import {
   formatTokens,
   formatUsd,
   makeMonthToDateWindow,
-  makeWindow,
+  makeUsageWindow,
+  parseUsageWindowKey,
+  type UsageWindowKey,
 } from "@t3tools/shared/usageFormat";
 import { Button, InlineButton } from "../ui/button";
 import {
@@ -68,11 +70,7 @@ import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart"
 import { usePaceWarnings } from "./usePaceWarning";
 import { sortModelsByTokens } from "./usageBreakdown";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
-import {
-  readUsagePagePreferences,
-  saveUsagePagePreferences,
-  type UsagePagePreferences,
-} from "./usagePagePreferences";
+import { readUsagePagePreferences, saveUsagePagePreferences } from "./usagePagePreferences";
 
 type UsageMetric = UsageChartMetric | "limits";
 const METRIC_OPTIONS = [
@@ -90,22 +88,15 @@ const WINDOW_OPTIONS = [
   { days: 7, label: "7 days" },
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
-] as const;
-
-function isUsageWindowDays(value: number): value is UsagePagePreferences["windowDays"] {
-  return WINDOW_OPTIONS.some((option) => option.days === value);
-}
+  { days: "month", label: "This month" },
+] as const satisfies readonly { days: UsageWindowKey; label: string }[];
 
 export function UsagePage() {
   const hasPaceWarning = usePaceWarnings().length > 0;
   const [preferences, setPreferences] = useState(readUsagePagePreferences);
   const [windowSelection, setWindowSelection] = useState(() => ({
     days: preferences.windowDays,
-    window: makeWindow(
-      preferences.windowDays,
-      undefined,
-      preferences.windowDays === 1 ? "hour" : "day",
-    ),
+    window: makeUsageWindow(preferences.windowDays),
   }));
   const [monthSelection, setMonthSelection] = useState(() => {
     const asOf = new Date();
@@ -183,15 +174,13 @@ export function UsagePage() {
   const activeProviders = useMemo(() => providersWithUsage(merged.providers), [merged.providers]);
   const timeValueColumnWidth = `${60 / (activeProviders.length + 2)}%`;
 
-  const selectWindow = (days: number) => {
-    if (!isUsageWindowDays(days)) return;
+  const selectWindow = (value: string) => {
+    const days = parseUsageWindowKey(value);
+    if (days === null) return;
     const nextPreferences = { metric, windowDays: days };
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
-    setWindowSelection({
-      days,
-      window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
-    });
+    setWindowSelection({ days, window: makeUsageWindow(days) });
   };
   const selectMetric = (nextMetric: UsageMetric) => {
     if (nextMetric === "limits") setLimitsNow(Date.now());
@@ -229,8 +218,8 @@ export function UsagePage() {
       });
       return;
     }
-    const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     const asOf = new Date();
+    const nextWindow = makeUsageWindow(windowDays, asOf);
     const nextMonthWindow = makeMonthToDateWindow(asOf);
     setMonthSelection({ asOf, window: nextMonthWindow });
     if (
@@ -326,7 +315,7 @@ export function UsagePage() {
           disabled={showingLimits}
           onValueChange={(next) => {
             const value = next[0];
-            if (value) selectWindow(Number(value));
+            if (value) selectWindow(value);
           }}
         >
           {WINDOW_OPTIONS.map((option) => (
@@ -383,7 +372,9 @@ export function UsagePage() {
         <Select
           value={String(windowDays)}
           disabled={showingLimits}
-          onValueChange={(value) => selectWindow(Number(value))}
+          onValueChange={(value) => {
+            if (value) selectWindow(value);
+          }}
         >
           <SelectTrigger
             aria-label="Usage period"

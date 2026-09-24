@@ -8,7 +8,8 @@ cost. These estimates are not your subscription bill.
 
 **This month** projects where the calendar month lands if the average daily pace so far holds.
 It follows the cost or tokens metric and the selected environments but ignores the period control,
-which still applies to every other total and chart. The bar is the month: the filled part is how
+which still applies to every other total and chart. Pick **This month** as the period to scope
+those totals and charts to the same calendar month. The bar is the month: the filled part is how
 much of it has passed, split by provider, and the empty tail is what the same pace adds by the last
 day. The cost is an API-equivalent estimate that excludes unpriced records; it is not your
 subscription bill. Early in the month, or when an environment has incomplete history, treat the

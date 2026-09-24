@@ -5,7 +5,8 @@ import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalSt
 const STORAGE_KEY = "t3code:usage-page-preferences:v1";
 const UsagePagePreferencesSchema = Schema.Struct({
   metric: Schema.Literals(["cost", "tokens", "limits"]),
-  windowDays: Schema.Literals([1, 7, 30, 90]),
+  // Rolling day counts, or "month" for the calendar month to date.
+  windowDays: Schema.Literals([1, 7, 30, 90, "month"]),
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 
