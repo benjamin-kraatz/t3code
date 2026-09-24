@@ -120,9 +120,9 @@ export function UsageForecast({
         </div>
 
         {providers.length > 0 ? (
-          // Hovering the row opens a month-to-date figure beside each projection,
-          // read as "so far → month end". The width animates through a grid track
-          // so neighbouring chips glide rather than jump.
+          // Hovering the row opens what the pace still adds after each projection,
+          // the same quantity the hatched tail of the bar draws. The width animates
+          // through a grid track so neighbouring chips glide rather than jump.
           <ul className="group/forecast-row flex flex-wrap items-center gap-x-5 gap-y-1">
             {providers.map(({ provider, value, soFar: providerSoFar }) => (
               <li key={provider} className="flex items-center gap-1.5 text-xs">
@@ -135,21 +135,22 @@ export function UsageForecast({
                   {PROVIDER_PRESENTATION[provider].label}
                 </span>
                 <span className="flex items-center tabular-nums">
+                  <span className="font-medium text-foreground">
+                    {format(value)}
+                    <span className="sr-only">
+                      {" "}
+                      projected, {format(value - providerSoFar)} still to come
+                    </span>
+                  </span>
                   <span
                     aria-hidden
                     className="grid grid-cols-[0fr] transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:grid-cols-[1fr]"
                   >
                     <span className="min-w-0 overflow-hidden whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 pe-1 text-muted-foreground -translate-x-1 opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:translate-x-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-none">
-                        {format(providerSoFar)}
-                        <span className="text-muted-foreground/60">→</span>
+                      <span className="inline-block ps-1 text-muted-foreground translate-x-1 opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-row:translate-x-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-none">
+                        +{format(value - providerSoFar)}
                       </span>
                     </span>
-                  </span>
-                  <span className="font-medium text-foreground">
-                    <span className="sr-only">{format(providerSoFar)} so far, </span>
-                    {format(value)}
-                    <span className="sr-only"> projected</span>
                   </span>
                 </span>
               </li>
@@ -158,7 +159,7 @@ export function UsageForecast({
               aria-hidden
               className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-300 motion-reduce:transition-none group-hover/forecast-row:opacity-100"
             >
-              so far → month end
+              + still to come this month
             </li>
           </ul>
         ) : null}
