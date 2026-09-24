@@ -51,7 +51,7 @@ export function UsageForecast({
     const forecast = projectedProviders.get(provider);
     const value =
       forecast === undefined ? 0 : metric === "cost" ? forecast.costUsd : forecast.totalTokens;
-    return value > 0 ? [{ provider, value }] : [];
+    return value > 0 ? [{ provider, value, soFar: monthToDateByProvider.get(provider) ?? 0 }] : [];
   });
   const monthWindow = makeMonthToDateWindow(asOf);
   const monthLabel = `${formatDayShort(monthWindow.sinceDay)} to ${formatDayShort(monthWindow.untilDay)}`;
@@ -120,8 +120,10 @@ export function UsageForecast({
         </div>
 
         {providers.length > 0 ? (
-          <ul className="flex flex-wrap gap-x-5 gap-y-1">
-            {providers.map(({ provider, value }) => (
+          // Hovering any provider figure swaps the whole row to month-to-date,
+          // so the values stay comparable with each other and with "So far" above.
+          <ul className="group/forecast-row flex flex-wrap items-center gap-x-5 gap-y-1">
+            {providers.map(({ provider, value, soFar: providerSoFar }) => (
               <li key={provider} className="flex items-center gap-1.5 text-xs">
                 <span
                   aria-hidden
@@ -131,9 +133,27 @@ export function UsageForecast({
                 <span className="text-muted-foreground">
                   {PROVIDER_PRESENTATION[provider].label}
                 </span>
-                <span className="font-medium text-foreground tabular-nums">{format(value)}</span>
+                <span className="grid font-medium text-foreground tabular-nums *:col-start-1 *:row-start-1">
+                  <span
+                    aria-hidden
+                    className="text-end transition-[opacity,translate,filter] duration-200 motion-reduce:transition-none group-hover/forecast-row:-translate-y-1 group-hover/forecast-row:opacity-0 group-hover/forecast-row:blur-[2px]"
+                  >
+                    {format(value)}
+                  </span>
+                  <span className="translate-y-1 text-end opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-200 motion-reduce:transition-none group-hover/forecast-row:translate-y-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-0">
+                    <span className="sr-only">{format(providerSoFar)} so far, </span>
+                    <span aria-hidden>{format(providerSoFar)}</span>
+                  </span>
+                  <span className="sr-only">{format(value)} projected</span>
+                </span>
               </li>
             ))}
+            <li
+              aria-hidden
+              className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-200 motion-reduce:transition-none group-hover/forecast-row:opacity-100"
+            >
+              so far
+            </li>
           </ul>
         ) : null}
       </div>
