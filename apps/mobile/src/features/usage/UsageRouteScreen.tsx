@@ -33,6 +33,7 @@ import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
 import { UsageLimitsSection } from "./UsageLimitsPooled";
+import { LimitsPaceWarningToggle } from "./LimitsPaceBanner";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
 import type { UsageChartMetric } from "./usageChartData";
@@ -273,11 +274,14 @@ export function UsageRouteScreen() {
           className="gap-6"
         >
           {showingLimits ? (
-            <UsageLimitsSection
-              now={limits.now}
-              failedLabels={limits.failedLabels}
-              selectedEnvironmentIds={selectedEnvironmentIds}
-            />
+            <>
+              <UsageLimitsSection
+                now={limits.now}
+                failedLabels={limits.failedLabels}
+                selectedEnvironmentIds={selectedEnvironmentIds}
+              />
+              <LimitsPaceWarningToggle />
+            </>
           ) : (
             <>
               {/* Period and metric together: neither applies to Limits, and

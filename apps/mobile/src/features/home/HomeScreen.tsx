@@ -60,6 +60,7 @@ import {
 } from "./homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { useMaterialFabScroll } from "./MaterialFabScrollContext";
+import { LimitsPaceBanner } from "../usage/LimitsPaceBanner";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -867,7 +868,12 @@ export function HomeScreen(props: HomeScreenProps) {
     );
   }
 
-  const listHeader = Platform.OS === "ios" ? null : <HomeTopContentSpacer />;
+  const listHeader = (
+    <>
+      {Platform.OS === "ios" ? null : <HomeTopContentSpacer />}
+      <LimitsPaceBanner now={Date.parse(`${nowMinute}:00.000Z`)} />
+    </>
+  );
 
   // Project scoping lives in the header filter menu (no inline chip row on
   // mobile — the menu is the one filter surface).
