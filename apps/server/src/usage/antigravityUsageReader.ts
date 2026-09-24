@@ -238,6 +238,8 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
               "antigravity-unknown",
             totals,
             reportedCostUsd: null,
+            // The workspace lives in protobuf metadata we do not decode.
+            cwd: null,
             dedupeKey: keys[0] ?? `antigravity:${sessionId}:${source}:${index}:${usageIndex}`,
           };
           records.push({

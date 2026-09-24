@@ -24,6 +24,7 @@ function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
       reasoningTokens: 0,
     },
     reportedCostUsd: null,
+    cwd: "/work/t3code",
     dedupeKey: "msg_1:",
     ...overrides,
   };
@@ -58,7 +59,7 @@ describe("scan cache round trip", () => {
   it("restores records unchanged", () => {
     const original = cacheWith([
       ["/a.jsonl", 100, [record(), record({ dedupeKey: "msg_2:", model: "claude-opus-5" })]],
-      ["/b.jsonl", 200, [record({ sessionId: "session-b", reportedCostUsd: 1.5 })]],
+      ["/b.jsonl", 200, [record({ sessionId: "session-b", reportedCostUsd: 1.5, cwd: null })]],
     ]);
     original.set("/grok.jsonl", {
       size: 40,
@@ -80,6 +81,7 @@ describe("scan cache round trip", () => {
         codexState: {
           model: "gpt-5.2-codex",
           sessionId: "session-c",
+          cwd: "/work/codex",
           lastUsageSignature: '{"input_tokens":1}',
           sawSessionMeta: true,
           suppressingForkCopies: false,
@@ -95,6 +97,29 @@ describe("scan cache round trip", () => {
     expect(restored.get("/b.jsonl")).toEqual(original.get("/b.jsonl"));
     expect(restored.get("/grok.jsonl")).toEqual(original.get("/grok.jsonl"));
     expect(restored.get("/codex.jsonl")).toEqual(original.get("/codex.jsonl"));
+  });
+
+  it("keeps a v3 cache's usage without directories and forces live transcripts to re-parse", () => {
+    // v3 may hold usage whose transcript the provider already deleted, so it
+    // must survive the upgrade; a transcript still on disk must re-parse whole.
+    const encoded = encodeScanCache(cacheWith([["/a.jsonl", 100, [record()]]]));
+    const { cwds: _cwds, ...rest } = encoded;
+    const legacy = {
+      ...rest,
+      version: 3,
+      files: Object.fromEntries(
+        Object.entries(encoded.files).map(([path, file]) => [
+          path,
+          { ...file, r: file.r.map((row) => row.slice(0, 10)), cs: { model: "legacy" } },
+        ]),
+      ),
+    };
+
+    const entry = decodeScanCache(JSON.parse(JSON.stringify(legacy))).get("/a.jsonl");
+    expect(entry?.records).toHaveLength(1);
+    expect(entry?.records[0]?.cwd).toBeNull();
+    expect(entry?.size).toBe(Number.MAX_SAFE_INTEGER);
+    expect(entry?.position.codexState).toBeNull();
   });
 
   it("drops an entry whose persisted parse state is corrupt", () => {

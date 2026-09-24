@@ -5,18 +5,22 @@
  * driven outside T3 Code. Source status describes gaps in local coverage.
  *
  * Environments return pre-aggregated `(day, hourStart?, provider, model, sourcePath?)`
- * buckets. Raw transcript records never cross the wire.
+ * buckets, plus a small per-project list for the window. Raw transcript records
+ * never cross the wire.
  *
  * @module usage
  */
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
  * Bumped whenever the shape of {@link UsageSummary} changes incompatibly. The
  * client renders partial coverage when an environment reports an older version
  * rather than failing the whole page.
+ *
+ * Additive optional fields (such as `projects`) do not bump it: older clients
+ * ignore them, and newer clients treat their absence as unattributed usage.
  */
 export const USAGE_CONTRACT_VERSION = 6 as const;
 
@@ -116,6 +120,34 @@ export const UsageBucket = Schema.Struct({
 export type UsageBucket = typeof UsageBucket.Type;
 
 /**
+ * Window totals for one project within one source.
+ *
+ * `projectId` is set when the working directory belongs to a T3 project on
+ * this environment (a thread's worktree, or inside the project's workspace
+ * root). Without it, `path` is a directory T3 does not know, and with neither
+ * the provider recorded no working directory at all. `provider` and
+ * `sourcePath` let clients apply the same source ownership as buckets.
+ */
+/**
+ * Title of the entry a server folds its less recently used projects into, so
+ * the list stays short and still sums to the headline totals.
+ */
+export const USAGE_OTHER_PROJECTS_TITLE = "Other projects";
+
+export const UsageProject = Schema.Struct({
+  provider: UsageProviderKind,
+  sourcePath: Schema.optional(TrimmedNonEmptyString),
+  projectId: Schema.optional(ProjectId),
+  title: TrimmedNonEmptyString,
+  path: Schema.optional(TrimmedNonEmptyString),
+  costUsd: Schema.Number,
+  totalTokens: NonNegativeInt,
+  records: NonNegativeInt,
+  unpricedRecords: NonNegativeInt,
+});
+export type UsageProject = typeof UsageProject.Type;
+
+/**
  * Identifies the physical transcript directory a source read from.
  *
  * Two environments on the same machine (worktree servers, for example) resolve
@@ -200,6 +232,8 @@ export const UsageSummary = Schema.Struct({
   sinceDay: UsageDay,
   untilDay: UsageDay,
   buckets: Schema.Array(UsageBucket),
+  /** Absent from servers that predate per-project attribution. */
+  projects: Schema.optional(Schema.Array(UsageProject)),
   sources: Schema.Array(UsageSource),
   pricing: UsagePricing,
   /** Wall-clock cost of the scan, surfaced in diagnostics. */

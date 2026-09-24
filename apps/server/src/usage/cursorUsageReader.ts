@@ -213,6 +213,8 @@ export async function readCursorAccountUsage(
           sessionId,
           totals,
           reportedCostUsd,
+          // Account-wide billing events carry no workspace.
+          cwd: null,
           dedupeKey: `cursor-account:${accountKey}:${key}:${occurrence}`,
         });
       }

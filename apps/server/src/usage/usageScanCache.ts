@@ -23,7 +23,11 @@ import type { CodexScanState, UsageRecord } from "./usageTranscripts.ts";
 // entries would keep serving double-counted records forever.
 // v3: entries carry the parse position and reducer state so a grown file
 // re-parses only its appended bytes instead of starting over.
-const USAGE_SCAN_CACHE_VERSION = 3 as const;
+// v4: records carry the working directory for per-project usage. v3 documents
+// still load (see `decodeScanCache`) because they hold usage whose transcripts
+// the provider may already have deleted.
+const USAGE_SCAN_CACHE_VERSION = 4 as const;
+const LEGACY_SCAN_CACHE_VERSION = 3;
 
 export interface CachedFile {
   readonly size: number;
@@ -58,6 +62,8 @@ type SerializedRecord = readonly [
   reasoningTokens: number,
   dedupeKey: string | null,
   reportedCostUsd: number | null,
+  /** Index into `cwds`, or -1 when the record has none. */
+  cwdIndex: number,
 ];
 
 interface SerializedFile {
@@ -79,15 +85,18 @@ interface SerializedCache {
   readonly version: number;
   readonly models: readonly string[];
   readonly sessions: readonly string[];
+  readonly cwds: readonly string[];
   readonly files: Readonly<Record<string, SerializedFile>>;
 }
 
-/** Serialises the cache, interning the repeated model and session strings. */
+/** Serialises the cache, interning the repeated model, session and cwd strings. */
 export function encodeScanCache(cache: ScanCache): SerializedCache {
   const models: string[] = [];
   const sessions: string[] = [];
+  const cwds: string[] = [];
   const modelIndex = new Map<string, number>();
   const sessionIndex = new Map<string, number>();
+  const cwdIndex = new Map<string, number>();
 
   const intern = (table: string[], index: Map<string, number>, value: string): number => {
     const existing = index.get(value);
@@ -109,6 +118,7 @@ export function encodeScanCache(cache: ScanCache): SerializedCache {
     record.totals.reasoningTokens,
     record.dedupeKey,
     record.reportedCostUsd,
+    record.cwd === null ? -1 : intern(cwds, cwdIndex, record.cwd),
   ];
 
   const files: Record<string, SerializedFile> = {};
@@ -126,7 +136,7 @@ export function encodeScanCache(cache: ScanCache): SerializedCache {
     };
   }
 
-  return { version: USAGE_SCAN_CACHE_VERSION, models, sessions, files };
+  return { version: USAGE_SCAN_CACHE_VERSION, models, sessions, cwds, files };
 }
 
 function isRecordArray(value: unknown): value is readonly unknown[] {
@@ -138,14 +148,22 @@ function isRecordArray(value: unknown): value is readonly unknown[] {
  *
  * Anything malformed yields an empty cache rather than an error: a corrupt
  * cache should cost one cold scan, never a broken page.
+ *
+ * A v3 document is migrated rather than dropped: its records load without a
+ * working directory, so usage whose transcript is gone still counts (as an
+ * unknown project). Their size is set out of reach so a transcript still on
+ * disk never matches or resumes, and re-parses whole with its directories.
  */
 export function decodeScanCache(document: unknown): ScanCache {
   const cache: ScanCache = new Map();
   if (typeof document !== "object" || document === null) return cache;
 
   const root = document as Partial<SerializedCache>;
-  if (root.version !== USAGE_SCAN_CACHE_VERSION) return cache;
-  if (!isRecordArray(root.models) || !isRecordArray(root.sessions)) return cache;
+  const legacy = root.version === LEGACY_SCAN_CACHE_VERSION;
+  if (root.version !== USAGE_SCAN_CACHE_VERSION && !legacy) return cache;
+  const rawCwds = legacy ? [] : root.cwds;
+  if (!isRecordArray(root.models) || !isRecordArray(root.sessions) || !isRecordArray(rawCwds))
+    return cache;
   if (typeof root.files !== "object" || root.files === null) return cache;
 
   // The intern tables must be all strings: a numeric entry would pass the
@@ -153,8 +171,10 @@ export function decodeScanCache(document: unknown): ScanCache {
   // at lookupRate. A corrupt table rejects the whole cache.
   if (!root.models.every((value) => typeof value === "string")) return cache;
   if (!root.sessions.every((value) => typeof value === "string")) return cache;
+  if (!rawCwds.every((value) => typeof value === "string")) return cache;
   const models = root.models as readonly string[];
   const sessions = root.sessions as readonly string[];
+  const cwds = rawCwds as readonly string[];
 
   // Any corrupt row disqualifies the whole entry. Keeping the survivors
   // under the original (size, mtime) would read as a valid warm hit and the
@@ -165,7 +185,7 @@ export function decodeScanCache(document: unknown): ScanCache {
   ): UsageRecord[] | null => {
     const records: UsageRecord[] = [];
     for (const row of rows) {
-      if (!isRecordArray(row) || row.length < 10) return null;
+      if (!isRecordArray(row) || row.length < (legacy ? 10 : 11)) return null;
       const [
         timestampMs,
         modelIndex,
@@ -177,6 +197,7 @@ export function decodeScanCache(document: unknown): ScanCache {
         reasoning,
         dedupeKey,
         reportedCostUsd,
+        cwdIndex,
       ] = row as SerializedRecord;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -192,6 +213,8 @@ export function decodeScanCache(document: unknown): ScanCache {
       ) {
         return null;
       }
+      const cwd = typeof cwdIndex === "number" && cwdIndex >= 0 ? cwds[cwdIndex] : null;
+      if (cwd === undefined) return null;
 
       records.push({
         provider,
@@ -206,6 +229,7 @@ export function decodeScanCache(document: unknown): ScanCache {
           reasoningTokens: reasoning,
         },
         reportedCostUsd: typeof reportedCostUsd === "number" ? reportedCostUsd : null,
+        cwd,
         dedupeKey: typeof dedupeKey === "string" ? dedupeKey : null,
       });
     }
@@ -236,7 +260,8 @@ export function decodeScanCache(document: unknown): ScanCache {
     ) {
       continue;
     }
-    const codexState = decodeCodexState(entry.cs);
+    // A migrated entry never resumes, so its v3 reducer state is not needed.
+    const codexState = legacy ? null : decodeCodexState(entry.cs);
     if (codexState === undefined) continue;
 
     const provider: UsageProviderKind = entry.p;
@@ -245,7 +270,7 @@ export function decodeScanCache(document: unknown): ScanCache {
     if (records === null || tailRecords === null) continue;
 
     cache.set(path, {
-      size: entry.s,
+      size: legacy ? Number.MAX_SAFE_INTEGER : entry.s,
       mtimeMs: entry.m,
       provider,
       records,
@@ -274,6 +299,7 @@ function decodeCodexState(value: unknown): CodexScanState | null | undefined {
   if (
     typeof state.model !== "string" ||
     typeof state.sessionId !== "string" ||
+    (state.cwd !== null && typeof state.cwd !== "string") ||
     (state.lastUsageSignature !== null && typeof state.lastUsageSignature !== "string") ||
     typeof state.sawSessionMeta !== "boolean" ||
     typeof state.suppressingForkCopies !== "boolean" ||
@@ -285,6 +311,7 @@ function decodeCodexState(value: unknown): CodexScanState | null | undefined {
   return {
     model: state.model,
     sessionId: state.sessionId,
+    cwd: state.cwd ?? null,
     lastUsageSignature: state.lastUsageSignature ?? null,
     sawSessionMeta: state.sawSessionMeta,
     suppressingForkCopies: state.suppressingForkCopies,

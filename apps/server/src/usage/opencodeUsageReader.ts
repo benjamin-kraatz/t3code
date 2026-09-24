@@ -53,6 +53,7 @@ export function parseOpenCodeMessage(
   };
   if (totalTokens(totals) === 0) return null;
   const id = fallback.id || text(message.id);
+  const cwd = text(object(message.path).cwd);
   const cost = message.cost;
   return {
     provider: "opencode",
@@ -63,6 +64,7 @@ export function parseOpenCodeMessage(
     // OpenCode writes zero for models without a known rate, including paid
     // subscription models. Let the shared price table estimate those records.
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? cost : null,
+    cwd: cwd || null,
     dedupeKey: id ? `opencode:${id}` : null,
   };
 }

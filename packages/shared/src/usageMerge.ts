@@ -8,8 +8,11 @@
  */
 import {
   USAGE_MERGE_COMPATIBLE_SINCE,
+  USAGE_OTHER_PROJECTS_TITLE,
   type EnvironmentId,
+  type ProjectId,
   type UsageBucket,
+  type UsageProject,
   type UsageProviderKind,
   type UsageSourceFingerprint,
   type UsageSummary,
@@ -53,6 +56,30 @@ export function isModelCostUnknown(model: ModelTotals): boolean {
   return model.records > 0 && model.unpricedRecords >= model.records;
 }
 
+/**
+ * - `project` - a T3 project on `environmentId`.
+ * - `directory` - a working directory no connected environment knows as a project.
+ * - `unknown` - the provider recorded no working directory, or the server
+ *   predates per-project attribution.
+ */
+export type ProjectTotalsKind = "project" | "directory" | "unknown";
+
+export interface ProjectTotals {
+  /** Stable across refreshes; projects are environment-local, so it includes the environment. */
+  readonly key: string;
+  readonly kind: ProjectTotalsKind;
+  readonly title: string;
+  readonly path: string | null;
+  readonly environmentId: EnvironmentId | null;
+  readonly projectId: ProjectId | null;
+  readonly costUsd: number;
+  readonly totalTokens: number;
+  readonly records: number;
+  readonly unpricedRecords: number;
+  readonly costShare: number;
+  readonly tokenShare: number;
+}
+
 export interface DailyTotals {
   readonly day: string;
   readonly costUsd: number;
@@ -87,6 +114,8 @@ export interface MergedUsage {
   readonly sessions: number;
   readonly providers: readonly ProviderTotals[];
   readonly models: readonly ModelTotals[];
+  /** Ordered by cost, then tokens. Sums to the headline totals. */
+  readonly projects: readonly ProjectTotals[];
   readonly daily: readonly DailyTotals[];
   readonly hourly: readonly HourlyTotals[];
   readonly costQuality: CostQuality;
@@ -150,12 +179,18 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
   return { ownerByFingerprint, duplicates };
 }
 
-/** Sources this environment owns after fingerprint claims, plus their buckets. */
+/**
+ * Sources this environment owns after fingerprint claims, plus their buckets
+ * and project totals. Both filter identically so they never disagree about a
+ * shared transcript directory.
+ */
 function ownedContribution(
   environment: EnvironmentUsage,
   ownerByFingerprint: ReadonlyMap<string, EnvironmentId>,
 ): {
   readonly buckets: readonly UsageBucket[];
+  /** `null` when the environment's server predates per-project attribution. */
+  readonly projects: readonly UsageProject[] | null;
   readonly sessionsByProvider: ReadonlyMap<UsageProviderKind, number>;
 } {
   const ownedProviders = new Set<UsageProviderKind>();
@@ -176,12 +211,16 @@ function ownedContribution(
       );
     }
   }
+  const isOwned = (entry: {
+    readonly provider: UsageProviderKind;
+    readonly sourcePath?: string | undefined;
+  }) =>
+    entry.sourcePath === undefined
+      ? ownedProviders.has(entry.provider)
+      : ownedSources.has(`${entry.provider}\u0000${entry.sourcePath}`);
   return {
-    buckets: environment.summary.buckets.filter((bucket) =>
-      bucket.sourcePath === undefined
-        ? ownedProviders.has(bucket.provider)
-        : ownedSources.has(`${bucket.provider}\u0000${bucket.sourcePath}`),
-    ),
+    buckets: environment.summary.buckets.filter(isOwned),
+    projects: environment.summary.projects?.filter(isOwned) ?? null,
     sessionsByProvider,
   };
 }
@@ -212,6 +251,7 @@ const EMPTY_MERGED: MergedUsage = {
   sessions: 0,
   providers: [],
   models: [],
+  projects: [],
   daily: [],
   hourly: [],
   costQuality: {
@@ -280,6 +320,39 @@ export function mergeUsage(
       unpricedRecords: number;
     }
   >();
+  type ProjectIdentity = Pick<
+    ProjectTotals,
+    "kind" | "title" | "path" | "environmentId" | "projectId"
+  >;
+  interface ProjectSums {
+    costUsd: number;
+    totalTokens: number;
+    records: number;
+    unpricedRecords: number;
+  }
+  const projectAccumulator = new Map<string, ProjectIdentity & ProjectSums & { key: string }>();
+  const addProject = (key: string, identity: ProjectIdentity, totals: ProjectSums) => {
+    const project = projectAccumulator.get(key) ?? {
+      key,
+      ...identity,
+      costUsd: 0,
+      totalTokens: 0,
+      records: 0,
+      unpricedRecords: 0,
+    };
+    project.costUsd += totals.costUsd;
+    project.totalTokens += totals.totalTokens;
+    project.records += totals.records;
+    project.unpricedRecords += totals.unpricedRecords;
+    projectAccumulator.set(key, project);
+  };
+  const UNKNOWN_PROJECT = {
+    kind: "unknown",
+    title: "Unknown project",
+    path: null,
+    environmentId: null,
+    projectId: null,
+  } as const;
   const dailyAccumulator = new Map<
     string,
     {
@@ -301,8 +374,59 @@ export function mergeUsage(
   const contributingEnvironments: EnvironmentId[] = [];
 
   for (const environment of current) {
-    const { buckets, sessionsByProvider } = ownedContribution(environment, ownerByFingerprint);
+    const { buckets, projects, sessionsByProvider } = ownedContribution(
+      environment,
+      ownerByFingerprint,
+    );
     if (buckets.length > 0) contributingEnvironments.push(environment.environmentId);
+
+    if (projects === null) {
+      // An older server cannot attribute its usage; count it as unknown so
+      // the project list still adds up to the headline.
+      for (const bucket of buckets) {
+        addProject("unknown", UNKNOWN_PROJECT, {
+          costUsd: bucket.costUsd,
+          totalTokens: bucketTokens(bucket),
+          records: bucket.records,
+          unpricedRecords: bucket.unpricedRecords,
+        });
+      }
+    } else {
+      for (const project of projects) {
+        if (project.projectId !== undefined) {
+          addProject(
+            `project\u0000${environment.environmentId}\u0000${project.projectId}`,
+            {
+              kind: "project",
+              title: project.title,
+              path: project.path ?? null,
+              environmentId: environment.environmentId,
+              projectId: project.projectId,
+            },
+            project,
+          );
+        } else if (project.path !== undefined) {
+          // Unowned directories merge by path: the same checkout seen from
+          // two environments is one line, not two.
+          addProject(
+            `directory\u0000${project.path}`,
+            {
+              kind: "directory",
+              title: project.title,
+              path: project.path,
+              environmentId: null,
+              projectId: null,
+            },
+            project,
+          );
+        } else if (project.title === USAGE_OTHER_PROJECTS_TITLE) {
+          // Each server folds its less recent projects into one entry per source.
+          addProject("other", { ...UNKNOWN_PROJECT, title: USAGE_OTHER_PROJECTS_TITLE }, project);
+        } else {
+          addProject("unknown", UNKNOWN_PROJECT, project);
+        }
+      }
+    }
 
     for (const [providerKind, providerSessions] of sessionsByProvider) {
       sessions += providerSessions;
@@ -417,6 +541,14 @@ export function mergeUsage(
     }))
     .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens);
 
+  const projects: ProjectTotals[] = [...projectAccumulator.values()]
+    .map((totals) => ({
+      ...totals,
+      costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
+      tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
+    }))
+    .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens);
+
   const daily: DailyTotals[] = [...dailyAccumulator.entries()]
     .map(([day, totals]) => ({
       day,
@@ -442,6 +574,7 @@ export function mergeUsage(
     sessions,
     providers,
     models,
+    projects,
     daily,
     hourly,
     costQuality: {

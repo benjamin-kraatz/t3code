@@ -30,6 +30,7 @@ import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
+import { UsageProjectsSection } from "./UsageProjectsSection";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
 import { UsageLimitsSection } from "./UsageLimitsPooled";
@@ -95,6 +96,11 @@ export function UsageRouteScreen() {
   const { merged, environments, selectedEnvironments, isPending, refresh } = useUsage(
     window,
     selectedEnvironmentIds,
+  );
+  const environmentLabels = useMemo(
+    () =>
+      new Map(environments.map((environment) => [environment.environmentId, environment.label])),
+    [environments],
   );
   const isFocused = useIsFocused();
   const limits = useRefreshLimits(selectedEnvironmentIds, isFocused && tab === "limits");
@@ -336,6 +342,11 @@ export function UsageRouteScreen() {
                     timeZone={window.timeZone}
                   />
                   <ProviderSection merged={merged} metric={metric} />
+                  <UsageProjectsSection
+                    merged={merged}
+                    metric={metric}
+                    environmentLabels={environmentLabels}
+                  />
                   <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
                   <ModelsSection merged={merged} />
                 </>

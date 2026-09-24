@@ -31,6 +31,7 @@ function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
       reasoningTokens: 0,
     },
     reportedCostUsd: null,
+    cwd: "/work/t3code",
     dedupeKey: null,
     ...overrides,
   };
@@ -190,6 +191,50 @@ describe("UsageAggregator", () => {
     expect(aggregator.add(record({ dedupeKey: "msg_1:" }))).toBe(true);
     expect(aggregator.add(record({ dedupeKey: "msg_1:" }))).toBe(false);
     expect(aggregator.add(record({ timestampMs: Date.parse("2026-07-01T12:00:00Z") }))).toBe(false);
+  });
+
+  it("totals each working directory per source from the same records as the buckets", () => {
+    const aggregator = new UsageAggregator({
+      timeZone: "UTC",
+      sinceDay: "2026-08-01",
+      untilDay: "2026-08-31",
+      rates,
+    });
+    aggregator.add(record({ dedupeKey: "msg_1:" }), "/home/.claude/projects");
+    // A copy carried into another transcript is still one response.
+    aggregator.add(record({ dedupeKey: "msg_1:" }), "/home/.claude/projects");
+    aggregator.add(record({ model: "claude-opus-5" }), "/home/.claude/projects");
+    aggregator.add(record({ cwd: "/work/other" }), "/home/.claude/projects");
+    aggregator.add(record({ cwd: null, model: "kimi-k3" }), "/home/.claude/projects");
+    aggregator.add(record(), "/other-home/.claude/projects");
+    aggregator.add(
+      record({ timestampMs: Date.parse("2026-07-01T12:00:00Z") }),
+      "/home/.claude/projects",
+    );
+    const result = aggregator.finish();
+
+    const find = (sourcePath: string, cwd: string | null) =>
+      result.directories.find(
+        (directory) => directory.sourcePath === sourcePath && directory.cwd === cwd,
+      );
+    expect(result.directories).toHaveLength(4);
+    expect(find("/home/.claude/projects", "/work/t3code")).toMatchObject({
+      provider: "claude",
+      records: 2,
+      totalTokens: 2 * (100 + 1000 + 10 + 50),
+      // claude-opus-5 has no rate in this table.
+      unpricedRecords: 1,
+    });
+    expect(find("/home/.claude/projects", "/work/t3code")?.costUsd).toBeCloseTo(0.004625, 9);
+    expect(find("/home/.claude/projects", null)).toMatchObject({
+      records: 1,
+      unpricedRecords: 1,
+      costUsd: 0,
+    });
+    expect(find("/other-home/.claude/projects", "/work/t3code")?.records).toBe(1);
+    expect(result.directories.reduce((sum, directory) => sum + directory.records, 0)).toBe(
+      result.buckets.reduce((sum, bucket) => sum + bucket.records, 0),
+    );
   });
 
   it("separates providers and models into their own buckets", () => {

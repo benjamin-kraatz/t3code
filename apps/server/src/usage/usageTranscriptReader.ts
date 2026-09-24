@@ -21,6 +21,7 @@ import * as NodePath from "node:path";
 import type { UsageProviderKind } from "@t3tools/contracts";
 
 import {
+  grokSessionCwd,
   initialCodexScanState,
   mightCarryUsage,
   parseClaudeLine,
@@ -217,6 +218,7 @@ export async function readTranscriptRecords(
       resumed = true;
     }
 
+    const grokCwd = provider === "grok" ? grokSessionCwd(filePath) : null;
     const parseLine = (line: string, state: CodexScanState, out: UsageRecord[]): void => {
       if (provider === "codex") {
         if (
@@ -232,7 +234,7 @@ export async function readTranscriptRecords(
       }
       if (!mightCarryUsage(line, provider)) return;
       if (provider === "grok") {
-        for (const grokRecord of parseGrokLine(line)) out.push(grokRecord);
+        for (const grokRecord of parseGrokLine(line, grokCwd)) out.push(grokRecord);
         return;
       }
       const record = parseClaudeLine(line);

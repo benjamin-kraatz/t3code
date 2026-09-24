@@ -2,7 +2,9 @@ import {
   USAGE_CONTRACT_VERSION,
   USAGE_MERGE_COMPATIBLE_SINCE,
   type EnvironmentId,
+  type ProjectId,
   type UsageBucket,
+  type UsageProject,
   type UsageDay,
   type UsageProviderKind,
   type UsageSummary,
@@ -68,6 +70,27 @@ function summary(
     pricing: { status: "fresh", source: "litellm", fetchedAt: null, knownModels: 10 },
     scanDurationMs: 1,
   };
+}
+
+function project(overrides: Partial<UsageProject> = {}): UsageProject {
+  return {
+    provider: "claude",
+    sourcePath: "/home/theo/.claude",
+    projectId: "project-t3" as ProjectId,
+    title: "T3 Code",
+    path: "/work/t3code",
+    costUsd: 10,
+    totalTokens: 1160,
+    records: 5,
+    unpricedRecords: 0,
+    ...overrides,
+  };
+}
+
+/** A project entry for a directory the server could not match to a T3 project. */
+function unowned(overrides: Partial<UsageProject> = {}): UsageProject {
+  const { projectId: _projectId, ...rest } = project(overrides);
+  return rest;
 }
 
 function environment(id: string, usageSummary: UsageSummary): EnvironmentUsage {
@@ -473,5 +496,122 @@ describe("mergeUsage", () => {
     ]);
     expect(merged.daily).toHaveLength(1);
     expect(merged.daily[0]?.costUsd).toBe(10);
+  });
+
+  describe("projects", () => {
+    const claude = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
+    const withProjects = (
+      usageSummary: UsageSummary,
+      projects: readonly UsageProject[],
+    ): UsageSummary => ({ ...usageSummary, projects });
+
+    it("counts a shared transcript directory's projects once, from the owning environment", () => {
+      const environments = [
+        environment(
+          "env-a",
+          withProjects(summary([bucket({ sourcePath: "/home/theo/.claude" })], [claude]), [
+            project(),
+          ]),
+        ),
+        environment("env-b", {
+          ...withProjects(summary([bucket({ sourcePath: "/home/theo/.claude" })], [claude]), [
+            project({ projectId: "project-b" as ProjectId, title: "T3 Code (worktree server)" }),
+          ]),
+          readAt: "2026-08-07T01:00:00.000Z",
+        }),
+      ];
+
+      const merged = mergeUsage(environments, USAGE_CONTRACT_VERSION);
+
+      expect(merged.projects).toHaveLength(1);
+      expect(merged.projects[0]).toMatchObject({
+        kind: "project",
+        environmentId: "env-b",
+        projectId: "project-b",
+        costUsd: 10,
+        costShare: 1,
+      });
+    });
+
+    it("keeps same-id projects on different environments apart", () => {
+      const merged = mergeUsage(
+        [
+          environment("env-a", withProjects(summary([bucket()], [claude]), [project()])),
+          environment(
+            "env-b",
+            withProjects(
+              summary([bucket()], [{ ...claude, hostId: "linux", homePath: "/home/theo/.claude" }]),
+              [project()],
+            ),
+          ),
+        ],
+        USAGE_CONTRACT_VERSION,
+      );
+
+      expect(merged.projects.map((entry) => entry.environmentId).sort()).toEqual([
+        "env-a",
+        "env-b",
+      ]);
+    });
+
+    it("merges unowned directories by path and unattributed usage into one entry", () => {
+      const codex = { provider: "codex" as const, hostId: "mac", homePath: "/home/theo/.codex" };
+      const merged = mergeUsage(
+        [
+          environment(
+            "env-a",
+            withProjects(
+              summary(
+                [bucket(), bucket({ provider: "codex", model: "gpt-5.6-sol" })],
+                [claude, codex],
+              ),
+              [
+                unowned({ title: "scratch", path: "/tmp/scratch" }),
+                unowned({
+                  provider: "codex",
+                  sourcePath: "/home/theo/.codex",
+                  title: "scratch",
+                  path: "/tmp/scratch",
+                  costUsd: 4,
+                }),
+                (({ path: _path, ...rest }) => rest)(
+                  unowned({ title: "Unknown project", costUsd: 1 }),
+                ),
+              ],
+            ),
+          ),
+        ],
+        USAGE_CONTRACT_VERSION,
+      );
+
+      expect(merged.projects.map((entry) => [entry.kind, entry.title, entry.costUsd])).toEqual([
+        ["directory", "scratch", 14],
+        ["unknown", "Unknown project", 1],
+      ]);
+    });
+
+    it("counts an older server's usage as unknown so projects still add up", () => {
+      const matching = mergeUsage(
+        [
+          environment("env-a", withProjects(summary([bucket()], [claude]), [project()])),
+          environment(
+            "env-old",
+            summary(
+              [bucket({ provider: "codex", model: "gpt-5.6-sol", costUsd: 6 })],
+              [{ provider: "codex", hostId: "old", homePath: "/home/theo/.codex" }],
+            ),
+          ),
+        ],
+        USAGE_CONTRACT_VERSION,
+      );
+
+      expect(matching.projects.map((entry) => [entry.kind, entry.costUsd])).toEqual([
+        ["project", 10],
+        ["unknown", 6],
+      ]);
+      expect(matching.projects.reduce((sum, entry) => sum + entry.costUsd, 0)).toBe(
+        matching.costUsd,
+      );
+    });
   });
 });

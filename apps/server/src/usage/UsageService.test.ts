@@ -11,6 +11,8 @@ import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hos
 import { mergeUsage } from "@t3tools/shared/usageMerge";
 import {
   EnvironmentId,
+  type OrchestrationShellSnapshot,
+  ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   UsageDay,
@@ -29,18 +31,25 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as UsageService from "./UsageService.ts";
 
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeUnknownJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
-function claudeLine(id: number, outputTokens: number, model = "claude-fable-5"): string {
+function claudeLine(
+  id: number,
+  outputTokens: number,
+  model = "claude-fable-5",
+  cwd?: string,
+): string {
   return `${JSON.stringify({
     type: "assistant",
     timestamp: "2026-08-01T10:00:00Z",
     requestId: `req_${id}`,
     sessionId: "session-1",
+    ...(cwd === undefined ? {} : { cwd }),
     message: {
       id: `msg_${id}`,
       model,
@@ -76,6 +85,43 @@ const setup = Effect.gen(function* () {
   };
 });
 
+/** Only the reads usage attribution makes; everything else fails loudly. */
+const projectionSnapshotQueryLayer = (shell: OrchestrationShellSnapshot) => {
+  const unused = () => Effect.die("unused by UsageService");
+  return Layer.succeed(ProjectionSnapshotQuery, {
+    getUserInputActivity: unused,
+    listActivitiesByKind: unused,
+    getCommandReadModel: unused,
+    getSnapshot: unused,
+    getShellSnapshot: () => Effect.succeed(shell),
+    getArchivedShellSnapshot: () => Effect.succeed({ ...shell, threads: [] }),
+    getDeletedWorktreeThreads: () => Effect.succeed([]),
+    getSnapshotSequence: unused,
+    getCounts: unused,
+    getEventReplayStats: unused,
+    getActiveProjectByWorkspaceRoot: unused,
+    getProjectShells: unused,
+    getProjectShellById: unused,
+    getFirstActiveThreadIdByProjectId: unused,
+    getImportedAgentSessionSources: unused,
+    getThreadCheckpointContext: unused,
+    getFullThreadDiffContext: unused,
+    getThreadRuntimeContext: unused,
+    getTurnStartMessage: unused,
+    getThreadShellById: unused,
+    getThreadDetailById: unused,
+    getThreadDetailSnapshot: unused,
+    searchThreads: unused,
+  });
+};
+
+const EMPTY_SHELL: OrchestrationShellSnapshot = {
+  snapshotSequence: 0,
+  projects: [],
+  threads: [],
+  updatedAt: "2026-08-01T00:00:00.000Z",
+};
+
 const serviceLayers = (input: {
   readonly prefix: string;
   readonly home: string;
@@ -84,9 +130,11 @@ const serviceLayers = (input: {
   /** Defaults to an unparsable document so every scan retries the fetch. */
   readonly ratesDocument?: unknown;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly shell?: OrchestrationShellSnapshot;
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(projectionSnapshotQueryLayer(input.shell ?? EMPTY_SHELL)),
     Layer.provideMerge(Layer.succeed(HostProcessPlatform, "linux")),
     Layer.provideMerge(ServerSettings.layerTest(input.settings)),
     Layer.provideMerge(
@@ -475,6 +523,65 @@ describe("UsageService", () => {
       yield* Effect.promise(() => NodeFSP.appendFile(transcript, claudeLine(2, 7)));
       const second = yield* service.readSummary(WINDOW);
       assert.strictEqual(totalOutputTokens(second), 12);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("attributes usage to the project owning each working directory", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      const projectId = ProjectId.make("project-t3");
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          transcript,
+          [
+            claudeLine(1, 5, "claude-fable-5", "/work/t3code/apps/web"),
+            claudeLine(2, 7, "claude-fable-5", "/worktrees/t3code/feature"),
+            claudeLine(3, 11, "claude-fable-5", "/scratch/elsewhere"),
+            claudeLine(4, 13),
+          ].join(""),
+        ),
+      );
+
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          serviceLayers({
+            prefix: "usage-service-projects-test",
+            home,
+            settings,
+            shell: {
+              ...EMPTY_SHELL,
+              projects: [
+                {
+                  id: projectId,
+                  title: "T3 Code",
+                  workspaceRoot: "/work/t3code",
+                  defaultModelSelection: null,
+                  scripts: [],
+                  createdAt: "2026-08-01T00:00:00.000Z",
+                  updatedAt: "2026-08-01T00:00:00.000Z",
+                },
+              ],
+            },
+          }),
+        ),
+      );
+
+      const summary = yield* service.readSummary(WINDOW);
+      const byTitle = new Map((summary.projects ?? []).map((project) => [project.title, project]));
+      assert.strictEqual(byTitle.get("T3 Code")?.projectId, projectId);
+      // Without the worktree's thread, it is a directory T3 does not know.
+      assert.strictEqual(byTitle.get("feature")?.path, "/worktrees/t3code/feature");
+      assert.isUndefined(byTitle.get("feature")?.projectId);
+      assert.strictEqual(byTitle.get("elsewhere")?.path, "/scratch/elsewhere");
+      assert.isUndefined(byTitle.get("Unknown project")?.path);
+      // Project totals cover exactly the records the buckets do.
+      assert.strictEqual(
+        (summary.projects ?? []).reduce((sum, project) => sum + project.totalTokens, 0),
+        summary.buckets.reduce(
+          (sum, bucket) => sum + bucket.totals.uncachedInputTokens + bucket.totals.outputTokens,
+          0,
+        ),
+      );
     }).pipe(Effect.scoped),
   );
 

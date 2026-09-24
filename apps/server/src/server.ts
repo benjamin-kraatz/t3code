@@ -497,6 +497,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   ),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
+  // Above the orchestration layer: usage attributes spend to its projects.
+  Layer.provideMerge(UsageLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive, DeviceLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
@@ -552,7 +554,6 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
-  Layer.provideMerge(UsageLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),

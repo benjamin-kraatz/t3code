@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   GROK_COST_USD_TICKS_PER_DOLLAR,
+  grokSessionCwd,
   initialCodexScanState,
   parseClaudeLine,
   parseCodexLine,
@@ -63,6 +64,17 @@ describe("parseClaudeLine", () => {
     expect(text?.totals).toEqual(toolUse?.totals);
   });
 
+  it("keeps the line's working directory", () => {
+    const record = parseClaudeLine(claudeLine({ messageId: "msg_3", contentType: "text" }));
+    expect(record?.cwd).toBe("/home/theo/project");
+
+    const withoutCwd = JSON.parse(claudeLine({ messageId: "msg_4", contentType: "text" })) as {
+      cwd?: string;
+    };
+    delete withoutCwd.cwd;
+    expect(parseClaudeLine(JSON.stringify(withoutCwd))?.cwd).toBeNull();
+  });
+
   it("ignores records that are not assistant messages", () => {
     expect(parseClaudeLine(JSON.stringify({ type: "user", message: {} }))).toBeNull();
     expect(parseClaudeLine("not json")).toBeNull();
@@ -111,6 +123,38 @@ describe("parseCodexLine", () => {
     expect(record?.totals.uncachedInputTokens).toBe(19239 - 11008);
     expect(record?.totals.cachedInputTokens).toBe(11008);
     expect(record?.totals.reasoningTokens).toBe(116);
+  });
+
+  it("carries the session's working directory onto later usage events", () => {
+    const state = initialCodexScanState();
+    parseCodexLine(
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-08-01T05:17:41.289Z",
+        payload: { type: "session_meta", id: "session", cwd: "/work/t3code" },
+      }),
+      state,
+    );
+    parseCodexLine(turnContext, state);
+    expect(parseCodexLine(tokenCount(100, 0, 10, 0), state)?.cwd).toBe("/work/t3code");
+
+    // A turn that runs elsewhere reports its own directory.
+    parseCodexLine(
+      JSON.stringify({
+        type: "turn_context",
+        timestamp: "2026-08-01T05:18:42.694Z",
+        payload: { type: "turn_context", model: "gpt-5.6-sol", cwd: "/work/t3code/apps/web" },
+      }),
+      state,
+    );
+    expect(parseCodexLine(tokenCount(200, 0, 20, 0), state)?.cwd).toBe("/work/t3code/apps/web");
+  });
+
+  it("reports no working directory when the rollout records none", () => {
+    const state = initialCodexScanState();
+    parseCodexLine(sessionMeta, state);
+    parseCodexLine(turnContext, state);
+    expect(parseCodexLine(tokenCount(100, 0, 10, 0), state)?.cwd).toBeNull();
   });
 
   it("skips a repeated token_count so deltas are not double counted", () => {
@@ -170,6 +214,26 @@ describe("parseCodexLine", () => {
       parsed.timestamp = timestamp;
       return JSON.stringify(parsed);
     };
+
+    it("keeps the child's working directory over copied ancestor metas", () => {
+      const state = initialCodexScanState();
+      const withCwd = (line: string, cwd: string) => {
+        const parsed = JSON.parse(line) as { payload: Record<string, unknown> };
+        parsed.payload["cwd"] = cwd;
+        return JSON.stringify(parsed);
+      };
+      parseCodexLine(
+        withCwd(meta({ id: "child", timestamp: "2026-08-01T05:00:00.000Z" }), "/work/child"),
+        state,
+      );
+      parseCodexLine(
+        withCwd(meta({ id: "parent", timestamp: "2026-08-01T05:00:00.000Z" }), "/work/parent"),
+        state,
+      );
+      parseCodexLine(turnContext, state);
+
+      expect(parseCodexLine(tokenCount(100, 0, 10, 0), state)?.cwd).toBe("/work/child");
+    });
 
     it("keeps the child session id over copied ancestor metas", () => {
       const state = initialCodexScanState();
@@ -235,6 +299,23 @@ describe("parseCodexLine", () => {
       );
       expect(record).not.toBeNull();
     });
+  });
+});
+
+describe("grokSessionCwd", () => {
+  it("decodes the working directory Grok encodes into the session path", () => {
+    expect(
+      grokSessionCwd("/home/theo/.grok/sessions/%2Fhome%2Ftheo%2Fproject/019fd20e/updates.jsonl"),
+    ).toBe("/home/theo/project");
+    expect(
+      grokSessionCwd("C:\\Users\\theo\\.grok\\sessions\\C%3A%5Cwork%5Capp\\id\\updates.jsonl"),
+    ).toBe("C:\\work\\app");
+  });
+
+  it("returns null for sessions without an encoded directory", () => {
+    expect(grokSessionCwd("/home/theo/.grok/sessions/session/updates.jsonl")).toBeNull();
+    expect(grokSessionCwd("/home/theo/.grok/sessions/a/b/updates.jsonl")).toBeNull();
+    expect(grokSessionCwd("/home/theo/.grok/sessions/%E0%A4%A/b/updates.jsonl")).toBeNull();
   });
 });
 

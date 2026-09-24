@@ -6,6 +6,10 @@
 environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
 cost. These estimates are not your subscription bill.
 
+On mobile, **By project** splits the same totals by the folder each session ran in. Folders that
+aren't T3 projects appear as **Outside T3**. Antigravity, Cursor, and history from older servers
+record no folder, so their usage appears under **Unknown project**.
+
 Totals depend on the history available on each server. Grok turns without a saved completed-turn
 record are missing from the totals.
 

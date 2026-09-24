@@ -10,6 +10,9 @@
  * from its cached parse position so only the appended bytes are read.
  * SQLite readers query live databases each scan so WAL writes remain visible.
  *
+ * Records keep the agent's working directory; the summary maps those onto this
+ * environment's projects via the orchestration read model.
+ *
  * @module UsageService
  */
 import * as NodeOS from "node:os";
@@ -44,6 +47,7 @@ import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
@@ -53,6 +57,7 @@ import { readOpenCodeUsage } from "./opencodeUsageReader.ts";
 import { readAntigravityUsage } from "./antigravityUsageReader.ts";
 import { readCursorAccountUsage } from "./cursorUsageReader.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
+import { attributeUsageProjects, type UsageProjectIndex } from "./usageProjects.ts";
 import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
 import {
   listTranscriptFiles,
@@ -140,6 +145,7 @@ export const layerTest = Layer.succeed(
         sinceDay: input.sinceDay,
         untilDay: input.untilDay,
         buckets: [],
+        projects: [],
         sources: [],
         pricing: EMPTY_PRICING,
         scanDurationMs: 0,
@@ -156,6 +162,7 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcessEnvironment;
   const platform = yield* HostProcessPlatform;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
   const fileCache: ScanCache = new Map();
   const sourceCache = new Map<string, typeof CachedSource.Type>();
@@ -236,6 +243,35 @@ export const make = Effect.gen(function* () {
   });
 
   const ensureRates = (force: boolean) => ratesLock.withPermit(loadRates(force));
+
+  /**
+   * Projects and every thread worktree, archived and deleted included, since
+   * their transcripts stay in the window after the thread leaves the sidebar.
+   * A failed read degrades to directory labels rather than failing the page.
+   */
+  const readProjectIndex: Effect.Effect<UsageProjectIndex> = Effect.all(
+    [
+      projectionSnapshotQuery.getShellSnapshot(),
+      projectionSnapshotQuery.getArchivedShellSnapshot(),
+      projectionSnapshotQuery.getDeletedWorktreeThreads(),
+    ],
+    // Sequential: both snapshots open a transaction on the same connection.
+  ).pipe(
+    Effect.map(([active, archived, deleted]) => ({
+      projects: active.projects,
+      worktrees: [...active.threads, ...archived.threads, ...deleted].flatMap((thread) =>
+        thread.worktreePath === null
+          ? []
+          : [{ projectId: thread.projectId, path: thread.worktreePath }],
+      ),
+    })),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Usage project attribution unavailable", cause).pipe(
+        Effect.as({ projects: [], worktrees: [] }),
+      ),
+    ),
+    Effect.withSpan("UsageService.readProjectIndex"),
+  );
 
   const refreshRates = ensureRates(true).pipe(
     Effect.map(pricing),
@@ -665,9 +701,13 @@ export const make = Effect.gen(function* () {
     // Pricing only matters once records are aggregated, so the rate table
     // loads while transcripts stream instead of gating them: a cold rates
     // fetch on a slow network no longer delays the scan by its own timeout.
-    const [, scannedDirs] = yield* Effect.all(
-      [ensureRates(false), collectDirs(windowStartMs, settings, retentionCutoffMs)],
-      { concurrency: 2 },
+    const [, scannedDirs, projectIndex] = yield* Effect.all(
+      [
+        ensureRates(false),
+        collectDirs(windowStartMs, settings, retentionCutoffMs),
+        readProjectIndex,
+      ],
+      { concurrency: 3 },
     );
 
     const aggregator = new UsageAggregator({
@@ -770,6 +810,7 @@ export const make = Effect.gen(function* () {
       sinceDay: input.sinceDay,
       untilDay: input.untilDay,
       buckets: aggregated.buckets,
+      projects: attributeUsageProjects(aggregated.directories, projectIndex),
       sources,
       pricing: pricing(),
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),

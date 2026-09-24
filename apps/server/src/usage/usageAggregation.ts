@@ -1,7 +1,7 @@
 // @effect-diagnostics globalDate:off
 /**
  * Folds parsed transcript records into `(day, hourStart?, provider, model)`
- * buckets.
+ * buckets, plus per-directory totals for the project breakdown.
  *
  * `Intl.DateTimeFormat` is the only reliable way to resolve a wall-clock day in
  * an arbitrary IANA zone, and it takes a `Date`. That is why the raw `Date`
@@ -14,7 +14,7 @@
  */
 import type { UsageBucket, UsageDay, UsageResolution, UsageTokenTotals } from "@t3tools/contracts";
 
-import { addTotals, EMPTY_TOTALS, type UsageRecord } from "./usageTranscripts.ts";
+import { addTotals, EMPTY_TOTALS, totalTokens, type UsageRecord } from "./usageTranscripts.ts";
 import { cacheSavingsUsd, priceUsage, type RateTable } from "./usagePricing.ts";
 
 /**
@@ -56,6 +56,23 @@ interface MutableBucket {
   sessions: Set<string>;
 }
 
+/**
+ * Window totals for one working directory within one source. Kept out of the
+ * buckets on purpose: a project dimension there would multiply every
+ * day x model cell and the payload with it.
+ */
+export interface DirectoryUsage {
+  readonly provider: UsageBucket["provider"];
+  readonly sourcePath?: string;
+  readonly cwd: string | null;
+  /** Newest in-window record, so the most recently used projects can be kept. */
+  lastUsedMs: number;
+  costUsd: number;
+  totalTokens: number;
+  records: number;
+  unpricedRecords: number;
+}
+
 export interface AggregateOptions {
   readonly timeZone: string;
   readonly sinceDay: string;
@@ -69,6 +86,8 @@ export interface AggregateOptions {
 
 export interface AggregateResult {
   readonly buckets: readonly UsageBucket[];
+  /** Per `(provider, sourcePath, cwd)` totals over the same records as `buckets`. */
+  readonly directories: readonly DirectoryUsage[];
   /** Records dropped because an earlier record carried the same dedupe key. */
   readonly duplicatesDropped: number;
   /** Records whose day fell outside the requested window. */
@@ -84,6 +103,7 @@ export interface AggregateResult {
  */
 export class UsageAggregator {
   readonly #buckets = new Map<string, MutableBucket>();
+  readonly #directories = new Map<string, DirectoryUsage>();
   readonly #seen = new Set<string>();
   readonly #toDay: (timestampMs: number) => string;
   readonly #hourlyWindow: { readonly sinceTimeMs: number; readonly untilTimeMs: number } | null;
@@ -181,6 +201,27 @@ export class UsageAggregator {
     if (priced.costSource === "unpriced") bucket.unpricedRecords += 1;
     if (priced.costSource === "providerReported") bucket.providerReportedRecords += 1;
     if (record.sessionId.length > 0) bucket.sessions.add(record.sessionId);
+
+    const directoryKey = `${record.provider}\u0000${sourcePath ?? ""}\u0000${record.cwd ?? ""}`;
+    let directory = this.#directories.get(directoryKey);
+    if (directory === undefined) {
+      directory = {
+        provider: record.provider,
+        ...(sourcePath === undefined ? {} : { sourcePath }),
+        cwd: record.cwd,
+        lastUsedMs: record.timestampMs,
+        costUsd: 0,
+        totalTokens: 0,
+        records: 0,
+        unpricedRecords: 0,
+      };
+      this.#directories.set(directoryKey, directory);
+    }
+    directory.lastUsedMs = Math.max(directory.lastUsedMs, record.timestampMs);
+    directory.costUsd += priced.costUsd;
+    directory.totalTokens += totalTokens(record.totals);
+    directory.records += 1;
+    if (priced.costSource === "unpriced") directory.unpricedRecords += 1;
     return true;
   }
 
@@ -215,6 +256,7 @@ export class UsageAggregator {
 
     return {
       buckets,
+      directories: [...this.#directories.values()],
       duplicatesDropped: this.#duplicatesDropped,
       outOfWindow: this.#outOfWindow,
     };

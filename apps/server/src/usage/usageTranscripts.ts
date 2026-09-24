@@ -16,6 +16,11 @@ export interface UsageRecord {
   readonly totals: UsageTokenTotals;
   readonly reportedCostUsd: number | null;
   /**
+   * Working directory the agent ran in, used to attribute usage to a project.
+   * `null` when the provider does not record one.
+   */
+  readonly cwd: string | null;
+  /**
    * Key for cross-file de-duplication, or `null` when the record is inherently
    * unique and needs no dedup.
    */
@@ -32,6 +37,10 @@ const EMPTY_TOTALS: UsageTokenTotals = {
 
 function int(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function parseTimestampMs(value: unknown): number | null {
@@ -145,6 +154,7 @@ export function parseClaudeLine(line: string): UsageRecord | null {
       reasoningTokens: 0,
     },
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
+    cwd: nonEmptyString(record["cwd"]),
     dedupeKey,
   };
 }
@@ -163,6 +173,8 @@ export function parseClaudeLine(line: string): UsageRecord | null {
 export interface CodexScanState {
   model: string;
   sessionId: string;
+  /** From `session_meta`, updated by each `turn_context` that carries one. */
+  cwd: string | null;
   lastUsageSignature: string | null;
   sawSessionMeta: boolean;
   /** While true, leading usage events are re-stamped copies of parent history. */
@@ -174,6 +186,7 @@ export function initialCodexScanState(): CodexScanState {
   return {
     model: "",
     sessionId: "",
+    cwd: null,
     lastUsageSignature: null,
     sawSessionMeta: false,
     suppressingForkCopies: false,
@@ -233,6 +246,7 @@ export function parseCodexLine(line: string, state: CodexScanState): UsageRecord
     state.sawSessionMeta = true;
     const id = payloadRecord["id"] ?? payloadRecord["session_id"];
     if (typeof id === "string") state.sessionId = id;
+    state.cwd = nonEmptyString(payloadRecord["cwd"]);
     const metaTimestampMs = parseTimestampMs(record["timestamp"]);
     if (metaTimestampMs !== null && isForkedSessionMeta(payloadRecord)) {
       state.suppressingForkCopies = true;
@@ -243,6 +257,7 @@ export function parseCodexLine(line: string, state: CodexScanState): UsageRecord
 
   if (record["type"] === "turn_context") {
     if (typeof payloadRecord["model"] === "string") state.model = payloadRecord["model"];
+    state.cwd = nonEmptyString(payloadRecord["cwd"]) ?? state.cwd;
     return null;
   }
 
@@ -304,6 +319,7 @@ export function parseCodexLine(line: string, state: CodexScanState): UsageRecord
     totals,
     // Codex does not report cost in the rollout.
     reportedCostUsd: null,
+    cwd: state.cwd,
     // Events surviving the fork-copy suppression above are unique to this
     // rollout, so they need no global dedup.
     dedupeKey: null,
@@ -364,9 +380,10 @@ function grokTotalsToUsage(totals: GrokUsageTotals): UsageTokenTotals {
  * under `usage.modelUsage`; when present each model becomes its own record.
  *
  * Returns every record for the line (0 or more). Callers stream line-by-line
- * and flatten.
+ * and flatten. Lines carry no working directory; callers pass the one encoded
+ * in the session's path (see `grokSessionCwd`).
  */
-export function parseGrokLine(line: string): readonly UsageRecord[] {
+export function parseGrokLine(line: string, cwd: string | null = null): readonly UsageRecord[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -433,6 +450,7 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
         sessionId,
         totals: grokTotalsToUsage(topLevel),
         reportedCostUsd: grokCostTicksToUsd(topLevel.costUsdTicks),
+        cwd,
         // No prompt id means we cannot tell two same-second updates apart.
         dedupeKey: promptId === null ? null : `${sessionId}:${promptId}:grok`,
       },
@@ -479,10 +497,29 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
       sessionId,
       totals,
       reportedCostUsd,
+      cwd,
       dedupeKey: promptId === null ? null : `${sessionId}:${promptId}:${entry.model}`,
     });
   }
   return results;
+}
+
+/**
+ * Grok keeps sessions at `<home>/sessions/<encoded-cwd>/<session-id>/updates.jsonl`,
+ * with the working directory URL-encoded into one path segment. Returns it
+ * decoded, or `null` when the segment does not decode to an absolute path.
+ */
+export function grokSessionCwd(updatesPath: string): string | null {
+  const segments = updatesPath.split(/[\\/]/);
+  const encoded = segments[segments.length - 3];
+  if (encoded === undefined || !encoded.includes("%")) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
+  return decoded.startsWith("/") || /^[A-Za-z]:[\\/]/.test(decoded) ? decoded : null;
 }
 
 export { EMPTY_TOTALS };
