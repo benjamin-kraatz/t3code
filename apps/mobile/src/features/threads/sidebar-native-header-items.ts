@@ -58,7 +58,7 @@ export function createSidebarHeaderItems(input: {
       label: "",
       accessibilityLabel: input.hasPaceWarning ? "Open settings, usage warning" : "Open settings",
       icon: sfSymbolIcon("gearshape"),
-      badge: input.hasPaceWarning ? { value: "" } : undefined,
+      badge: input.hasPaceWarning ? { value: "•" } : undefined,
       onPress: input.onOpenSettings,
     }),
   ];

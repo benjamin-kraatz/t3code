@@ -43,7 +43,7 @@ export function HomeHeader(props: HomeHeaderProps) {
               accessibilityLabel: hasPaceWarning ? "Open settings, usage warning" : "Open settings",
               icon: { name: "ellipsis", type: "sfSymbol" } as const,
               identifier: "home-settings",
-              badge: hasPaceWarning ? { value: "" } : undefined,
+              badge: hasPaceWarning ? { value: "•" } : undefined,
               label: "",
               onPress: props.onOpenSettings,
               type: "button",
