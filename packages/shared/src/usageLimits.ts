@@ -443,6 +443,36 @@ export function paceGapOf(window: ServerProviderUsageWindow, now: number): numbe
   return elapsed === null ? null : Math.round(window.usedPercent - elapsed * 100);
 }
 
+export interface PaceDrift {
+  /** Which side of even pace the window sits on. */
+  readonly direction: "ahead" | "under";
+  /** Distance from even pace in points, always positive. */
+  readonly points: number;
+  /** Past the on-pace tolerance, so worth calling out in words, not just on the bar. */
+  readonly offPace: boolean;
+  /** Where the fill would sit had the window been spent evenly, as percent left. */
+  readonly evenRemainingPercent: number;
+}
+
+/**
+ * Which way and how far a window drifts from even pace, or null when it is
+ * untimed or dead on. Any drift is returned so a bar can draw it; `offPace`
+ * applies the same tolerance as `paceOf`.
+ */
+export function paceDriftOf(window: ServerProviderUsageWindow, now: number): PaceDrift | null {
+  const elapsed = elapsedShare(window, now);
+  if (elapsed === null) return null;
+  const gap = window.usedPercent - elapsed * 100;
+  const points = Math.abs(Math.round(gap));
+  if (points === 0) return null;
+  return {
+    direction: gap > 0 ? "ahead" : "under",
+    points,
+    offPace: paceOfGap(gap) !== "on",
+    evenRemainingPercent: Math.round((1 - elapsed) * 100),
+  };
+}
+
 function paceOfGap(gap: number): LimitPace {
   if (gap > 5) return "ahead";
   if (gap < -5) return "under";

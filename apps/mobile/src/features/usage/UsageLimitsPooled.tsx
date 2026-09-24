@@ -8,10 +8,12 @@ import {
   elapsedShare,
   formatDuration,
   formatResetsIn,
+  paceDriftOf,
   paceGapOf,
   paceOf,
   remainingPercent,
   type LimitAccount,
+  type PaceDrift,
   type LimitPoolWindow,
 } from "@t3tools/shared/usageLimits";
 import { useId, useState } from "react";
@@ -22,6 +24,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
 import { paceText, ResetCredits } from "./UsageLimitsSection";
@@ -34,6 +38,25 @@ function accountName(account: LimitAccount) {
   if (!account.email) return DRIVER_LABEL[account.driver] ?? String(account.driver);
   const [local = "", domain = ""] = account.email.split("@");
   return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase() || "Account";
+}
+
+/** Warning amber when spend outruns the clock, a calmer green when there is quota to spare. */
+function usePaceColors(): Record<PaceDrift["direction"], string> {
+  const { themeAppearance, themeVariables } = useAppearancePreferences();
+  return {
+    ahead: themeVariables["--color-warning-foreground"],
+    under: themeAppearance === "dark" ? "#34d399" : "#059669",
+  };
+}
+
+/** Drift past the on-pace tolerance, the point where it earns words and a coloured marker. */
+function flaggedDrift(window: ServerProviderUsageWindow, now: number): PaceDrift | null {
+  const drift = paceDriftOf(window, now);
+  return drift?.offPace ? drift : null;
+}
+
+function driftText(drift: PaceDrift | null): string {
+  return drift ? `, ${drift.points}% ${drift.direction} pace` : "";
 }
 
 /**
@@ -49,49 +72,102 @@ function PaceMarker({
   readonly color: string;
   readonly now: number;
 }) {
+  const paceColors = usePaceColors();
   const elapsed = elapsedShare(window, now);
   if (elapsed === null) return null;
+  const offPace = flaggedDrift(window, now);
   return (
     <View
       pointerEvents="none"
-      className="absolute top-0 bottom-0 w-0.5"
+      className="absolute top-0 bottom-0"
       style={{
         left: `${Math.round((1 - elapsed) * 100)}%`,
-        marginLeft: -1,
-        backgroundColor: color,
+        width: offPace ? 3 : 2,
+        marginLeft: offPace ? -1.5 : -1,
+        backgroundColor: offPace ? paceColors[offPace.direction] : color,
       }}
     />
   );
 }
 
-/** The spent share comes back at reset. SVG keeps the hatching static on both platforms. */
+/**
+ * The spent share comes back at reset. Any drift from pace is drawn between the
+ * fill and the marker: ahead, the quota spent before the clock allowed it;
+ * under, the quota banked beyond it. SVG keeps the hatching static on both platforms.
+ */
 function AccountSegment({
   remaining,
   color,
   pending,
+  drift,
 }: {
   readonly remaining: number;
   readonly color: string;
   readonly pending: boolean;
+  readonly drift: PaceDrift | null;
 }) {
-  const patternId = useId().replace(/:/g, "");
+  const id = useId().replace(/:/g, "");
+  const paceColors = usePaceColors();
+  const driftColor = drift ? paceColors[drift.direction] : null;
   return (
     <Svg width="100%" height="100%" accessible={false}>
       <Defs>
-        <Pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse">
+        <Pattern id={`${id}spent`} width={6} height={6} patternUnits="userSpaceOnUse">
           <Path d="M-1 1L1 -1M0 6L6 0M5 7L7 5" stroke={color} strokeWidth={1} opacity={0.22} />
         </Pattern>
+        {driftColor ? (
+          <Pattern id={`${id}drift`} width={4} height={4} patternUnits="userSpaceOnUse">
+            <Path
+              d="M-1 1L1 -1M0 4L4 0M3 5L5 3"
+              stroke={driftColor}
+              strokeWidth={1.5}
+              opacity={drift?.direction === "ahead" ? 0.9 : 0.5}
+            />
+          </Pattern>
+        ) : null}
       </Defs>
       {pending ? (
         <Rect
           x={`${remaining}%`}
           width={`${100 - remaining}%`}
           height="100%"
-          fill={`url(#${patternId})`}
+          fill={`url(#${id}spent)`}
         />
       ) : null}
       <Rect width={`${remaining}%`} height="100%" fill={color} opacity={0.35} />
+      {drift && driftColor ? (
+        <>
+          <Rect
+            x={`${Math.min(remaining, drift.evenRemainingPercent)}%`}
+            width={`${Math.abs(drift.evenRemainingPercent - remaining)}%`}
+            height="100%"
+            fill={driftColor}
+            opacity={drift.direction === "ahead" ? 0.2 : 0.15}
+          />
+          <Rect
+            x={`${Math.min(remaining, drift.evenRemainingPercent)}%`}
+            width={`${Math.abs(drift.evenRemainingPercent - remaining)}%`}
+            height="100%"
+            fill={`url(#${id}drift)`}
+          />
+        </>
+      ) : null}
     </Svg>
+  );
+}
+
+/** `12% ahead` in a tinted pill, for rows with room to say it in words. */
+function DriftPill({ drift }: { readonly drift: PaceDrift }) {
+  const color = usePaceColors()[drift.direction];
+  return (
+    <View
+      className="rounded px-1.5 py-0.5"
+      style={{ backgroundColor: themeColorWithAlpha(color, 0.14) }}
+    >
+      <Text className="text-xs font-t3-medium tabular-nums" style={{ color }}>
+        {drift.direction === "ahead" ? "↗" : "↘"} {drift.points}% {drift.direction}
+      </Text>
+    </View>
   );
 }
 
@@ -107,6 +183,7 @@ function PoolWindowCard({
   readonly environmentIds: readonly string[] | null;
 }) {
   const navigation = useNavigation();
+  const paceColors = usePaceColors();
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
   const openAccount = (account: LimitAccount) =>
     navigation.navigate("SettingsSheet", {
@@ -149,19 +226,27 @@ function PoolWindowCard({
       <View className="flex-row gap-1">
         {pool.columns.map(({ account, window }, index) => {
           if (!window) return <View key={account.key} className="h-7 min-w-0 flex-1" />;
+          const drift = paceDriftOf(window, now);
+          const offPace = drift?.offPace ? drift : null;
           return (
             <Pressable
               key={account.key}
               accessibilityRole="button"
-              accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left`}
+              accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${driftText(offPace)}`}
               accessibilityHint="Show account details"
               onPress={() => openAccount(account)}
               className="h-7 min-w-0 flex-1 overflow-hidden rounded-md bg-subtle"
+              style={
+                offPace?.direction === "ahead"
+                  ? { borderWidth: 1, borderColor: themeColorWithAlpha(paceColors.ahead, 0.5) }
+                  : null
+              }
             >
               <AccountSegment
                 remaining={remainingPercent(window)}
                 color={color}
                 pending={Boolean(window.resetsAt)}
+                drift={drift}
               />
               <PaceMarker window={window} color={color} now={now} />
               <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
@@ -178,11 +263,12 @@ function PoolWindowCard({
           if (!window) return null;
           const credits = account.limits.resetCredits?.availableCount ?? 0;
           const resetsIn = formatResetsIn(window, now);
+          const offPace = flaggedDrift(window, now);
           return (
             <Pressable
               key={account.key}
               accessibilityRole="button"
-              accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset credits banked` : ""}`}
+              accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${driftText(offPace)}${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset credits banked` : ""}`}
               accessibilityHint="Show account details"
               onPress={() => openAccount(account)}
               className="min-h-[44px] flex-row items-center gap-2 active:opacity-60"
@@ -201,6 +287,7 @@ function PoolWindowCard({
               <Text className="text-sm font-t3-medium tabular-nums text-foreground">
                 {remainingPercent(window)}%
               </Text>
+              {offPace ? <DriftPill drift={offPace} /> : null}
               <View className="flex-row items-center gap-1">
                 {resetsIn ? (
                   <Text className="text-xs tabular-nums text-foreground-muted">
@@ -327,6 +414,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
   const window = pool?.members.find((member) => member.account.key === accountKey)?.window;
   const reset = pool?.resets.find((candidate) => candidate.member.account.key === accountKey);
   const pace = window ? paceOf(window, now) : null;
+  const paceColors = usePaceColors();
   const [revealed, setRevealed] = useState(false);
   return (
     <SettingsScreen title="Account">
@@ -372,7 +460,10 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
                 {remainingPercent(window)}% left
               </Text>
               {pace ? (
-                <Text className="text-sm tabular-nums text-foreground-muted">
+                <Text
+                  className="text-sm tabular-nums text-foreground-muted"
+                  style={pace === "on" ? null : { color: paceColors[pace] }}
+                >
                   {paceText(pace, paceGapOf(window, now))}
                 </Text>
               ) : null}

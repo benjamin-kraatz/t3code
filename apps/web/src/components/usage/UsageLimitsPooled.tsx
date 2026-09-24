@@ -6,8 +6,8 @@ import {
   formatDuration,
   formatResetsIn,
   type LimitAccount,
-  paceGapOf,
-  paceOf,
+  type PaceDrift,
+  paceDriftOf,
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
@@ -116,18 +116,10 @@ function AccountName({
   );
 }
 
-interface OffPace {
-  readonly pace: "ahead" | "under";
-  /** Distance from even pace in points, always positive. */
-  readonly points: number;
-}
-
-/** How far one account's window strays from even pace, or null when it is on pace or untimed. */
-function offPaceOf(window: LimitPoolMember["window"], now: number): OffPace | null {
-  const pace = paceOf(window, now);
-  const gap = paceGapOf(window, now);
-  if (pace === null || pace === "on" || gap === null) return null;
-  return { pace, points: Math.abs(gap) };
+/** Drift past the on-pace tolerance, the point where it earns a badge and a coloured marker. */
+function flaggedDrift(window: LimitPoolMember["window"], now: number): PaceDrift | null {
+  const drift = paceDriftOf(window, now);
+  return drift?.offPace ? drift : null;
 }
 
 /** Warning amber when spend outruns the clock, a calmer green when there is quota to spare. */
@@ -152,12 +144,12 @@ const offPaceStyles = {
   },
 } as const;
 
-function OffPaceBadge({ offPace }: { readonly offPace: OffPace }) {
-  const { badge, Icon } = offPaceStyles[offPace.pace];
+function OffPaceBadge({ offPace }: { readonly offPace: PaceDrift }) {
+  const { badge, Icon } = offPaceStyles[offPace.direction];
   return (
     <Badge variant={badge} size="sm" className="tabular-nums">
       <Icon aria-hidden />
-      {offPace.points}% {offPace.pace}
+      {offPace.points}% {offPace.direction}
     </Badge>
   );
 }
@@ -195,7 +187,7 @@ function SegmentPopover({
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const remaining = remainingPercent(window);
   const resetsIn = formatResetsIn(window, now);
-  const offPace = offPaceOf(window, now);
+  const offPace = flaggedDrift(window, now);
   const where =
     account.environments.length > 0
       ? account.environments.map((environment) => environment.label).join(", ")
@@ -231,8 +223,8 @@ function SegmentPopover({
         <Row label="Left">{remaining}%</Row>
         {offPace ? (
           <Row label="Pace">
-            <span className={cn("font-medium", offPaceStyles[offPace.pace].text)}>
-              {offPace.points}% {offPace.pace}
+            <span className={cn("font-medium", offPaceStyles[offPace.direction].text)}>
+              {offPace.points}% {offPace.direction}
             </span>
           </Row>
         ) : null}
@@ -291,7 +283,8 @@ function PoolSegment({
   const remaining = remainingPercent(window);
   const elapsed = elapsedShare(window, now);
   const evenPaceRemaining = elapsed === null ? null : Math.round((1 - elapsed) * 100);
-  const offPace = offPaceOf(window, now);
+  const drift = paceDriftOf(window, now);
+  const offPace = drift?.offPace ? drift : null;
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
@@ -302,10 +295,10 @@ function PoolSegment({
           <button
             type="button"
             style={{ gridColumn: index, gridRow: 1 }}
-            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${evenPaceRemaining === null ? "" : `, even pace marker at ${evenPaceRemaining}% left`}${offPace ? `, ${offPace.points}% ${offPace.pace} pace` : ""}${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
+            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${evenPaceRemaining === null ? "" : `, even pace marker at ${evenPaceRemaining}% left`}${offPace ? `, ${offPace.points}% ${offPace.direction} pace` : ""}${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
             className={cn(
               "relative h-5 min-w-0 cursor-pointer overflow-hidden rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-border @2xl/pool:h-8",
-              offPace && offPaceStyles[offPace.pace].ring,
+              offPace && offPaceStyles[offPace.direction].ring,
             )}
           />
         }
@@ -328,17 +321,18 @@ function PoolSegment({
           />
         ) : null}
         {/*
-          Off pace, the stretch between the fill and the marker is called out: ahead, the
-          quota spent before the clock allowed it; under, the quota banked beyond it.
+          Any drift from pace is drawn between the fill and the marker: ahead, the quota
+          spent before the clock allowed it; under, the quota banked beyond it. Past the
+          on-pace tolerance the marker, ring and badge join in.
         */}
-        {offPace && evenPaceRemaining !== null ? (
+        {drift ? (
           <div
             aria-hidden
-            className={cn("absolute inset-y-0", offPaceStyles[offPace.pace].band)}
+            className={cn("absolute inset-y-0", offPaceStyles[drift.direction].band)}
             style={{
-              left: `${Math.min(remaining, evenPaceRemaining)}%`,
-              width: `${Math.abs(evenPaceRemaining - remaining)}%`,
-              backgroundImage: `repeating-linear-gradient(135deg, ${offPaceStyles[offPace.pace].stripe} 0 1.5px, transparent 1.5px 4px)`,
+              left: `${Math.min(remaining, drift.evenRemainingPercent)}%`,
+              width: `${Math.abs(drift.evenRemainingPercent - remaining)}%`,
+              backgroundImage: `repeating-linear-gradient(135deg, ${offPaceStyles[drift.direction].stripe} 0 1.5px, transparent 1.5px 4px)`,
             }}
           />
         ) : null}
@@ -347,7 +341,7 @@ function PoolSegment({
             aria-hidden="true"
             className={cn(
               "pointer-events-none absolute inset-y-0 w-0.5",
-              offPace && ["w-[3px]", offPaceStyles[offPace.pace].marker],
+              offPace && ["w-[3px]", offPaceStyles[offPace.direction].marker],
             )}
             style={{
               left: `${evenPaceRemaining}%`,
@@ -430,7 +424,7 @@ function LegendRow({
   readonly index: number;
 }) {
   const remaining = remainingPercent(window);
-  const offPace = offPaceOf(window, now);
+  const offPace = flaggedDrift(window, now);
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
