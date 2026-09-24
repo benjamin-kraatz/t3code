@@ -1,4 +1,9 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  SettingsIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
@@ -29,6 +34,8 @@ import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { readUsagePagePreferences, saveUsagePagePreferences } from "../usage/usagePagePreferences";
+import { usePaceWarnings } from "../usage/usePaceWarning";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -108,18 +115,31 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
+  badge = false,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  badge?: boolean;
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              onClick={onClick}
+              size="icon"
+              className="relative"
+            >
               {icon}
+              {badge ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute right-1 top-1 size-2 rounded-full bg-warning"
+                />
+              ) : null}
             </SidebarMenuButton>
           }
         />
@@ -130,6 +150,15 @@ function SidebarUtilityItem({
 }
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+  const paceWarnings = usePaceWarnings();
+  const worstPaceWarning = paceWarnings[0];
+  const warningProvider = worstPaceWarning
+    ? worstPaceWarning.driver === "claudeAgent"
+      ? "Claude"
+      : worstPaceWarning.driver === "codex"
+        ? "Codex"
+        : worstPaceWarning.driver
+    : null;
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -174,6 +203,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     }
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
+  const handlePaceWarningClick = useCallback(() => {
+    saveUsagePagePreferences({ ...readUsagePagePreferences(), metric: "limits" });
+    handleUsageClick();
+  }, [handleUsageClick]);
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
@@ -185,37 +218,59 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center">
-      {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<PullRequestGlyph.pullRequest />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
-            />
+    <>
+      {!currentFooterPage && worstPaceWarning ? (
+        <button
+          type="button"
+          onClick={handlePaceWarningClick}
+          className="mb-2 flex w-full items-center gap-2 rounded-lg border border-warning/32 bg-warning-surface px-3 py-2 text-left text-xs text-warning-foreground outline-none hover:bg-warning/16 focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`${warningProvider} ${worstPaceWarning.window.label} limit is ${Math.abs(worstPaceWarning.window.paceGapPercent ?? 0)}% ahead of pace${paceWarnings.length > 1 ? `, ${paceWarnings.length - 1} more` : ""}. Show limits`}
+        >
+          <TriangleAlertIcon className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            {warningProvider} · {worstPaceWarning.window.label}
+          </span>
+          <span className="shrink-0 tabular-nums">
+            {Math.abs(worstPaceWarning.window.paceGapPercent ?? 0)}% ahead
+          </span>
+          {paceWarnings.length > 1 ? (
+            <span className="shrink-0">+{paceWarnings.length - 1}</span>
           ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-        </>
-      )}
-      <SidebarUpdatePill />
-    </SidebarMenu>
+        </button>
+      ) : null}
+      <SidebarMenu className="flex-row items-center">
+        {currentFooterPage ? (
+          <SidebarMenuItem className="min-w-0 flex-1">
+            <SidebarMenuButton onClick={handleBackClick}>
+              <ArrowLeftIcon />
+              <span>Back</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : (
+          <>
+            <SidebarUtilityItem
+              icon={<SettingsIcon />}
+              label="Settings"
+              onClick={handleSettingsClick}
+            />
+            {pullRequestsSupported ? (
+              <SidebarUtilityItem
+                icon={<PullRequestGlyph.pullRequest />}
+                label="Pull Requests"
+                onClick={handlePullRequestsClick}
+              />
+            ) : null}
+            <SidebarUtilityItem
+              icon={<ChartNoAxesColumnIcon />}
+              badge={Boolean(worstPaceWarning)}
+              label={worstPaceWarning ? "Usage, pace warning" : "Usage"}
+              onClick={handleUsageClick}
+            />
+          </>
+        )}
+        <SidebarUpdatePill />
+      </SidebarMenu>
+    </>
   );
 });
 

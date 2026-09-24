@@ -63,6 +63,7 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
+import { usePaceWarnings } from "./usePaceWarning";
 import { sortModelsByTokens } from "./usageBreakdown";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 import {
@@ -94,6 +95,7 @@ function isUsageWindowDays(value: number): value is UsagePagePreferences["window
 }
 
 export function UsagePage() {
+  const hasPaceWarning = usePaceWarnings().length > 0;
   const [preferences, setPreferences] = useState(readUsagePagePreferences);
   const [windowSelection, setWindowSelection] = useState(() => ({
     days: preferences.windowDays,
@@ -285,6 +287,9 @@ export function UsagePage() {
           {METRIC_OPTIONS.map((option) => (
             <Toggle key={option.value} value={option.value}>
               {option.label}
+              {option.value === "limits" && hasPaceWarning ? (
+                <span className="size-2 rounded-full bg-warning" aria-label="Pace warning" />
+              ) : null}
             </Toggle>
           ))}
         </ToggleGroup>
@@ -333,11 +338,20 @@ export function UsagePage() {
             <SelectValue>
               {METRIC_OPTIONS.find((option) => option.value === metric)?.label}
             </SelectValue>
+            {hasPaceWarning ? (
+              <span className="size-2 shrink-0 rounded-full bg-warning" aria-label="Pace warning" />
+            ) : null}
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {METRIC_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
+                {option.value === "limits" && hasPaceWarning ? (
+                  <span
+                    className="ms-1.5 inline-block size-2 rounded-full bg-warning"
+                    aria-label="Pace warning"
+                  />
+                ) : null}
               </SelectItem>
             ))}
           </SelectPopup>

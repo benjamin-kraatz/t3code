@@ -2,15 +2,18 @@ import {
   collectLimitAccounts,
   collectLimitNotices,
   collectLimitPools,
+  elapsedShare,
   formatDuration,
   formatResetsIn,
   type LimitAccount,
+  paceGapOf,
+  paceOf,
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { AlertTriangleIcon, TicketIcon } from "lucide-react";
+import { AlertTriangleIcon, TicketIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -19,16 +22,13 @@ import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import {
-  PaceIcon,
-  ResetCreditDialog,
-  barColor,
-  resetCreditsSummary,
-  useResetCredit,
-} from "./UsageLimits";
+import { Switch } from "../ui/switch";
+import { ResetCreditDialog, barColor, resetCreditsSummary, useResetCredit } from "./UsageLimits";
+import { setPaceWarningEnabled, usePaceWarningEnabled } from "./usePaceWarning";
 
 /** `someone@example.com` → `SE`: enough to tell accounts apart, too little to identify one. */
 function accountInitials(email: string): string {
@@ -116,6 +116,52 @@ function AccountName({
   );
 }
 
+interface OffPace {
+  readonly pace: "ahead" | "under";
+  /** Distance from even pace in points, always positive. */
+  readonly points: number;
+}
+
+/** How far one account's window strays from even pace, or null when it is on pace or untimed. */
+function offPaceOf(window: LimitPoolMember["window"], now: number): OffPace | null {
+  const pace = paceOf(window, now);
+  const gap = paceGapOf(window, now);
+  if (pace === null || pace === "on" || gap === null) return null;
+  return { pace, points: Math.abs(gap) };
+}
+
+/** Warning amber when spend outruns the clock, a calmer green when there is quota to spare. */
+const offPaceStyles = {
+  ahead: {
+    band: "bg-warning/20",
+    stripe: "var(--warning)",
+    marker: "bg-warning",
+    ring: "ring-1 ring-warning/50",
+    text: "text-warning-foreground",
+    badge: "warning",
+    Icon: TrendingUpIcon,
+  },
+  under: {
+    band: "bg-success/15",
+    stripe: "color-mix(in srgb, var(--success) 45%, transparent)",
+    marker: "bg-success",
+    ring: "",
+    text: "text-success-foreground",
+    badge: "success",
+    Icon: TrendingDownIcon,
+  },
+} as const;
+
+function OffPaceBadge({ offPace }: { readonly offPace: OffPace }) {
+  const { badge, Icon } = offPaceStyles[offPace.pace];
+  return (
+    <Badge variant={badge} size="sm" className="tabular-nums">
+      <Icon aria-hidden />
+      {offPace.points}% {offPace.pace}
+    </Badge>
+  );
+}
+
 function Row({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
     <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3">
@@ -149,6 +195,7 @@ function SegmentPopover({
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const remaining = remainingPercent(window);
   const resetsIn = formatResetsIn(window, now);
+  const offPace = offPaceOf(window, now);
   const where =
     account.environments.length > 0
       ? account.environments.map((environment) => environment.label).join(", ")
@@ -182,6 +229,13 @@ function SegmentPopover({
       </div>
       <div className="flex flex-col gap-1 border-t border-border/60 pt-2.5">
         <Row label="Left">{remaining}%</Row>
+        {offPace ? (
+          <Row label="Pace">
+            <span className={cn("font-medium", offPaceStyles[offPace.pace].text)}>
+              {offPace.points}% {offPace.pace}
+            </span>
+          </Row>
+        ) : null}
         {window.resetsAt ? (
           <Row label="Resets">
             {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
@@ -235,6 +289,9 @@ function PoolSegment({
 }) {
   const [open, setOpen] = useState(false);
   const remaining = remainingPercent(window);
+  const elapsed = elapsedShare(window, now);
+  const evenPaceRemaining = elapsed === null ? null : Math.round((1 - elapsed) * 100);
+  const offPace = offPaceOf(window, now);
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
@@ -245,8 +302,11 @@ function PoolSegment({
           <button
             type="button"
             style={{ gridColumn: index, gridRow: 1 }}
-            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
-            className="relative h-5 min-w-0 cursor-pointer overflow-hidden rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-border @2xl/pool:h-8"
+            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${evenPaceRemaining === null ? "" : `, even pace marker at ${evenPaceRemaining}% left`}${offPace ? `, ${offPace.points}% ${offPace.pace} pace` : ""}${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
+            className={cn(
+              "relative h-5 min-w-0 cursor-pointer overflow-hidden rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-border @2xl/pool:h-8",
+              offPace && offPaceStyles[offPace.pace].ring,
+            )}
           />
         }
       >
@@ -267,6 +327,35 @@ function PoolSegment({
             }}
           />
         ) : null}
+        {/*
+          Off pace, the stretch between the fill and the marker is called out: ahead, the
+          quota spent before the clock allowed it; under, the quota banked beyond it.
+        */}
+        {offPace && evenPaceRemaining !== null ? (
+          <div
+            aria-hidden
+            className={cn("absolute inset-y-0", offPaceStyles[offPace.pace].band)}
+            style={{
+              left: `${Math.min(remaining, evenPaceRemaining)}%`,
+              width: `${Math.abs(evenPaceRemaining - remaining)}%`,
+              backgroundImage: `repeating-linear-gradient(135deg, ${offPaceStyles[offPace.pace].stripe} 0 1.5px, transparent 1.5px 4px)`,
+            }}
+          />
+        ) : null}
+        {evenPaceRemaining !== null ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-y-0 w-0.5",
+              offPace && ["w-[3px]", offPaceStyles[offPace.pace].marker],
+            )}
+            style={{
+              left: `${evenPaceRemaining}%`,
+              marginLeft: offPace ? -1.5 : -1,
+              backgroundColor: offPace ? undefined : color,
+            }}
+          />
+        ) : null}
         <span
           aria-hidden
           className="absolute inset-0 flex items-center justify-center text-[10px] leading-none font-semibold text-foreground/80 tabular-nums @2xl/pool:hidden"
@@ -276,6 +365,7 @@ function PoolSegment({
         <div className="relative hidden h-full min-w-0 items-center gap-1.5 px-2 text-xs @2xl/pool:flex">
           <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
           <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
+          {offPace ? <OffPaceBadge offPace={offPace} /> : null}
           {/* Countdown and badge get their own plate: fill and hatching run under them otherwise. */}
           <span className="ms-auto flex shrink-0 items-center gap-1.5 rounded-sm bg-background/85 px-1.5 py-0.5 text-[11px] text-foreground tabular-nums">
             {resetsIn?.replace("resets in ", "↻ ") ?? ""}
@@ -340,6 +430,7 @@ function LegendRow({
   readonly index: number;
 }) {
   const remaining = remainingPercent(window);
+  const offPace = offPaceOf(window, now);
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
@@ -359,6 +450,7 @@ function LegendRow({
       </span>
       <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
       <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
+      {offPace ? <OffPaceBadge offPace={offPace} /> : null}
       <span className="ms-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums">
         {resetsIn?.replace("resets in ", "↻ ") ?? ""}
         {credits ? (
@@ -495,12 +587,23 @@ function PoolWindowCard({
             {pool.remainingPercent}%
           </span>
           <span className="text-sm text-muted-foreground">left</span>
-          {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
         </span>
         {nextRefill ? (
           <span className="text-xs text-muted-foreground tabular-nums">
             <span className="font-medium text-foreground">↻ +{nextRefill.restoresPercent}%</span>{" "}
             {nextRefill.at <= now ? "now" : `in ${formatDuration(nextRefill.at - now)}`}
+          </span>
+        ) : null}
+        {pool.pace ? (
+          <span
+            className={cn(
+              "text-xs font-medium tabular-nums",
+              pool.pace === "ahead" ? "text-warning-foreground" : "text-muted-foreground",
+            )}
+          >
+            {pool.pace === "on" || pool.paceGapPercent === null
+              ? "On pace"
+              : `${Math.abs(pool.paceGapPercent)}% ${pool.pace === "ahead" ? "ahead of pace" : "under pace"}`}
           </span>
         ) : null}
       </div>
@@ -545,6 +648,7 @@ export function UsageLimitsPooled({
 }) {
   const pools = collectLimitPools(collectLimitAccounts(presentations), now);
   const notices = collectLimitNotices(presentations);
+  const paceWarningEnabled = usePaceWarningEnabled();
   return (
     <div className="flex flex-col gap-8">
       {pools.length === 0 && notices.length === 0 ? (
@@ -556,6 +660,21 @@ export function UsageLimitsPooled({
         <PoolSection key={pool.driver} pool={pool} now={now} />
       ))}
       <LimitNotices notices={notices} />
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-4 py-3">
+        <div>
+          <label htmlFor="limits-pace-warning" className="text-sm font-medium">
+            Pace warning in sidebar
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Show a warning when a limit runs ahead of pace.
+          </p>
+        </div>
+        <Switch
+          id="limits-pace-warning"
+          checked={paceWarningEnabled}
+          onCheckedChange={setPaceWarningEnabled}
+        />
+      </div>
     </div>
   );
 }
