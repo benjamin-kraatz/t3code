@@ -303,10 +303,16 @@ function PoolSegment({
           />
         }
       >
-        {/* Translucent so the label reads over the fill for any provider colour and theme. */}
+        {/*
+          Translucent so the label reads over the fill for any provider colour and theme.
+          An ahead band continues the fill, so the rounded end moves to the band.
+        */}
         <div
           aria-hidden
-          className="absolute inset-y-0 left-0 rounded-md opacity-35"
+          className={cn(
+            "absolute inset-y-0 left-0 opacity-35",
+            drift?.direction === "ahead" ? "rounded-s-md" : "rounded-md",
+          )}
           style={{ width: `${remaining}%`, backgroundColor: color }}
         />
         {/* The spent share is hatched, not blank: it is what the countdown restores. */}
@@ -328,7 +334,7 @@ function PoolSegment({
         {drift ? (
           <div
             aria-hidden
-            className={cn("absolute inset-y-0", offPaceStyles[drift.direction].band)}
+            className={cn("absolute inset-y-0 rounded-e-md", offPaceStyles[drift.direction].band)}
             style={{
               left: `${Math.min(remaining, drift.evenRemainingPercent)}%`,
               width: `${Math.abs(drift.evenRemainingPercent - remaining)}%`,
