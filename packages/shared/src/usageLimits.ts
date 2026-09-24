@@ -268,6 +268,8 @@ export interface LimitPoolWindow {
   readonly remainingPercent: number;
   readonly usedPercent: number;
   readonly pace: LimitPace | null;
+  /** Points of quota used beyond the clock; negative is headroom. */
+  readonly paceGapPercent: number | null;
   readonly resets: ReadonlyArray<{
     readonly member: LimitPoolMember;
     readonly at: number;
@@ -384,7 +386,8 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
       ),
       usedPercent: Math.round(usedPercent),
       remainingPercent: Math.round(100 - usedPercent),
-      pace: meanElapsed === null ? null : paceOfShares(timedUsed, meanElapsed),
+      pace: meanElapsed === null ? null : paceOfGap(timedUsed - meanElapsed * 100),
+      paceGapPercent: meanElapsed === null ? null : Math.round(timedUsed - meanElapsed * 100),
       resets,
     };
   });
@@ -431,11 +434,16 @@ export type LimitPace = "ahead" | "on" | "under";
  */
 export function paceOf(window: ServerProviderUsageWindow, now: number): LimitPace | null {
   const elapsed = elapsedShare(window, now);
-  return elapsed === null ? null : paceOfShares(window.usedPercent, elapsed);
+  return elapsed === null ? null : paceOfGap(window.usedPercent - elapsed * 100);
 }
 
-function paceOfShares(usedPercent: number, elapsed: number): LimitPace {
-  const gap = usedPercent - elapsed * 100;
+/** How far usage runs ahead of the clock, in points; negative is headroom. */
+export function paceGapOf(window: ServerProviderUsageWindow, now: number): number | null {
+  const elapsed = elapsedShare(window, now);
+  return elapsed === null ? null : Math.round(window.usedPercent - elapsed * 100);
+}
+
+function paceOfGap(gap: number): LimitPace {
   if (gap > 5) return "ahead";
   if (gap < -5) return "under";
   return "on";

@@ -19,6 +19,7 @@ import {
   elapsedShare,
   formatResetsIn,
   limitsNotice,
+  paceGapOf,
   paceOf,
   providersWithLimits,
   remainingPercent,
@@ -58,11 +59,14 @@ describe("pace", () => {
     expect(paceOf(window, now)).toBe("under");
     expect(paceOf({ ...window, usedPercent: 62 }, now)).toBe("on");
     expect(paceOf({ ...window, usedPercent: 80 }, now)).toBe("ahead");
+    expect(paceGapOf({ ...window, usedPercent: 80 }, now)).toBe(20);
+    expect(paceGapOf({ ...window, usedPercent: 45 }, now)).toBe(-15);
   });
 
   it("has no pace without a reset or a duration", () => {
     expect(paceOf({ ...window, resetsAt: undefined }, now)).toBeNull();
     expect(paceOf({ ...window, windowDurationMins: undefined }, now)).toBeNull();
+    expect(paceGapOf({ ...window, resetsAt: undefined }, now)).toBeNull();
     expect(formatResetsIn({ ...window, resetsAt: undefined }, now)).toBeNull();
   });
 
@@ -546,6 +550,7 @@ describe("pools", () => {
       remainingPercent: 40,
       usedPercent: 60,
       pace: "under",
+      paceGapPercent: -10,
     });
     expect(
       session?.resets.map((reset) => [reset.member.account.key, reset.restoresPercent]),

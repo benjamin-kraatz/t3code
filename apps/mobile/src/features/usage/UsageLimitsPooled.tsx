@@ -1,12 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type ServerProviderUsageWindow } from "@t3tools/contracts";
 import {
   collectLimitAccounts,
   collectLimitNotices,
   collectLimitPools,
+  elapsedShare,
   formatDuration,
   formatResetsIn,
+  paceGapOf,
+  paceOf,
   remainingPercent,
   type LimitAccount,
   type LimitPoolWindow,
@@ -21,17 +24,44 @@ import { AppText as Text } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
-import { ResetCredits } from "./UsageLimitsSection";
+import { paceText, ResetCredits } from "./UsageLimitsSection";
 import { useProviderColors } from "./usageProviders";
 
 const DRIVER_LABEL: Partial<Record<string, string>> = { codex: "Codex", claudeAgent: "Claude" };
-const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
 
 function accountName(account: LimitAccount) {
   if (account.displayName) return account.displayName;
   if (!account.email) return DRIVER_LABEL[account.driver] ?? String(account.driver);
   const [local = "", domain = ""] = account.email.split("@");
   return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase() || "Account";
+}
+
+/**
+ * Where the fill would sit had the account spent evenly: time left in the
+ * window. Fill short of the marker is ahead of pace, past it is headroom.
+ */
+function PaceMarker({
+  window,
+  color,
+  now,
+}: {
+  readonly window: ServerProviderUsageWindow;
+  readonly color: string;
+  readonly now: number;
+}) {
+  const elapsed = elapsedShare(window, now);
+  if (elapsed === null) return null;
+  return (
+    <View
+      pointerEvents="none"
+      className="absolute top-0 bottom-0 w-0.5"
+      style={{
+        left: `${Math.round((1 - elapsed) * 100)}%`,
+        marginLeft: -1,
+        backgroundColor: color,
+      }}
+    />
+  );
 }
 
 /** The spent share comes back at reset. SVG keeps the hatching static on both platforms. */
@@ -105,7 +135,9 @@ function PoolWindowCard({
           </View>
         </View>
         {pool.pace ? (
-          <Text className="text-xs text-foreground-tertiary">{PACE_LABEL[pool.pace]}</Text>
+          <Text className="text-xs tabular-nums text-foreground-tertiary">
+            {paceText(pool.pace, pool.paceGapPercent)}
+          </Text>
         ) : null}
       </View>
       {nextRefill ? (
@@ -131,6 +163,7 @@ function PoolWindowCard({
                 color={color}
                 pending={Boolean(window.resetsAt)}
               />
+              <PaceMarker window={window} color={color} now={now} />
               <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
                 <Text className="text-xs font-t3-medium tabular-nums text-foreground">
                   {index + 1}
@@ -293,6 +326,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
     ?.windows.find((candidate) => candidate.id === windowId && candidate.kind === windowKind);
   const window = pool?.members.find((member) => member.account.key === accountKey)?.window;
   const reset = pool?.resets.find((candidate) => candidate.member.account.key === accountKey);
+  const pace = window ? paceOf(window, now) : null;
   const [revealed, setRevealed] = useState(false);
   return (
     <SettingsScreen title="Account">
@@ -337,6 +371,11 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
               <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
                 {remainingPercent(window)}% left
               </Text>
+              {pace ? (
+                <Text className="text-sm tabular-nums text-foreground-muted">
+                  {paceText(pace, paceGapOf(window, now))}
+                </Text>
+              ) : null}
               {window.resetsAt ? (
                 <Text selectable className="text-sm text-foreground-muted">
                   Resets{" "}
