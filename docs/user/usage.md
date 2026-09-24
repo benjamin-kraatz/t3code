@@ -6,6 +6,11 @@
 environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
 cost. These estimates are not your subscription bill.
 
+**Projected month-end tokens** extends this month's processed tokens at the average daily pace
+so far. It uses the selected environments and remains a rough estimate, especially early in the
+month or when an environment has incomplete history. The period control still applies to the
+other usage totals and charts.
+
 On mobile, **By project** splits the same totals by the folder each session ran in. Folders that
 aren't T3 projects appear as **Outside T3**. Antigravity, Cursor, and history from older servers
 record no folder, so their usage appears under **Unknown project**.

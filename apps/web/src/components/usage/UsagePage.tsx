@@ -37,7 +37,9 @@ import {
   formatPercent,
   formatTokens,
   formatUsd,
+  makeMonthToDateWindow,
   makeWindow,
+  projectMonthEndTokens,
 } from "@t3tools/shared/usageFormat";
 import { Button, InlineButton } from "../ui/button";
 import {
@@ -105,6 +107,10 @@ export function UsagePage() {
       preferences.windowDays === 1 ? "hour" : "day",
     ),
   }));
+  const [monthSelection, setMonthSelection] = useState(() => {
+    const asOf = new Date();
+    return { asOf, window: makeMonthToDateWindow(asOf) };
+  });
   const metric = preferences.metric;
   const showingLimits = metric === "limits";
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -119,6 +125,14 @@ export function UsagePage() {
     window,
     selectedEnvironmentIds,
   );
+  const monthQuery =
+    window.resolution === "day" && window.sinceDay <= monthSelection.window.sinceDay
+      ? window
+      : monthSelection.window;
+  const monthUsage = useUsage(monthQuery, selectedEnvironmentIds);
+  const monthTokens = monthUsage.merged.daily
+    .filter((period) => period.day >= monthSelection.window.sinceDay)
+    .reduce((total, period) => total + period.totalTokens, 0);
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const sourceMessages = [
     ...new Set(
@@ -213,6 +227,9 @@ export function UsagePage() {
       return;
     }
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
+    const asOf = new Date();
+    const nextMonthWindow = makeMonthToDateWindow(asOf);
+    setMonthSelection({ asOf, window: nextMonthWindow });
     if (
       nextWindow.sinceDay !== window.sinceDay ||
       nextWindow.untilDay !== window.untilDay ||
@@ -223,7 +240,11 @@ export function UsagePage() {
     }
     refreshingRef.current = true;
     setIsRefreshing(true);
-    void refresh(nextWindow).finally(() => {
+    const refreshes = [refresh(nextWindow)];
+    if (nextWindow.resolution !== "day" || nextWindow.sinceDay > nextMonthWindow.sinceDay) {
+      refreshes.push(monthUsage.refresh(nextMonthWindow));
+    }
+    void Promise.all(refreshes).finally(() => {
       refreshingRef.current = false;
       setIsRefreshing(false);
     });
@@ -505,6 +526,17 @@ export function UsagePage() {
                 <section className="flex flex-col gap-2">
                   <h2 className="text-sm font-medium text-foreground">Totals</h2>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
+                    {!monthUsage.isPending &&
+                    monthUsage.selectedEnvironments.some(
+                      (environment) => environment.summary !== null,
+                    ) ? (
+                      <Metric
+                        label="Projected month-end tokens"
+                        value={formatTokens(
+                          projectMonthEndTokens(monthTokens, monthSelection.asOf),
+                        )}
+                      />
+                    ) : null}
                     <Metric label="Processed tokens" value={formatTokens(merged.totalTokens)} />
                     <Metric label="Cached input" value={formatTokens(merged.cachedInputTokens)} />
                     <Metric

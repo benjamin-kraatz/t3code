@@ -247,3 +247,21 @@ export function makeWindow(
     resolution,
   };
 }
+
+/** A daily usage window covering the current calendar month in the viewer's zone. */
+export function makeMonthToDateWindow(now = new Date()): UsageSummaryInput {
+  const window = makeWindow(1, now);
+  return {
+    ...window,
+    sinceDay: UsageDay.make(`${window.untilDay.slice(0, 7)}-01`),
+  };
+}
+
+/** Extends the observed month-to-date rate through the last day of the month. */
+export function projectMonthEndTokens(totalTokens: number, now = new Date()): number {
+  const day = makeMonthToDateWindow(now).untilDay;
+  const [year, month, dayOfMonth] = day.split("-").map(Number);
+  if (year === undefined || month === undefined || dayOfMonth === undefined) return totalTokens;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return Math.round((totalTokens * daysInMonth) / dayOfMonth);
+}

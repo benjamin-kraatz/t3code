@@ -16,7 +16,9 @@ import {
   formatPercent,
   formatTokens,
   formatUsd,
+  makeMonthToDateWindow,
   makeWindow,
+  projectMonthEndTokens,
 } from "@t3tools/shared/usageFormat";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
@@ -88,6 +90,10 @@ export function UsageRouteScreen() {
     days: 30,
     window: makeWindow(30),
   }));
+  const [monthSelection, setMonthSelection] = useState(() => {
+    const asOf = new Date();
+    return { asOf, window: makeMonthToDateWindow(asOf) };
+  });
   const [metric, setMetric] = useState<UsageChartMetric>("cost");
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
@@ -97,6 +103,14 @@ export function UsageRouteScreen() {
     window,
     selectedEnvironmentIds,
   );
+  const monthQuery =
+    window.resolution === "day" && window.sinceDay <= monthSelection.window.sinceDay
+      ? window
+      : monthSelection.window;
+  const monthUsage = useUsage(monthQuery, selectedEnvironmentIds);
+  const monthTokens = monthUsage.merged.daily
+    .filter((period) => period.day >= monthSelection.window.sinceDay)
+    .reduce((total, period) => total + period.totalTokens, 0);
   const environmentLabels = useMemo(
     () =>
       new Map(environments.map((environment) => [environment.environmentId, environment.label])),
@@ -156,6 +170,9 @@ export function UsageRouteScreen() {
   const refreshWindow = () => {
     if (refreshingRef.current) return;
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
+    const asOf = new Date();
+    const nextMonthWindow = makeMonthToDateWindow(asOf);
+    setMonthSelection({ asOf, window: nextMonthWindow });
     if (
       nextWindow.sinceDay !== window.sinceDay ||
       nextWindow.untilDay !== window.untilDay ||
@@ -166,7 +183,11 @@ export function UsageRouteScreen() {
     }
     refreshingRef.current = true;
     setRefreshingUsage(true);
-    void refresh(nextWindow).finally(() => {
+    const refreshes = [refresh(nextWindow)];
+    if (nextWindow.resolution !== "day" || nextWindow.sinceDay > nextMonthWindow.sinceDay) {
+      refreshes.push(monthUsage.refresh(nextMonthWindow));
+    }
+    void Promise.all(refreshes).finally(() => {
       refreshingRef.current = false;
       setRefreshingUsage(false);
     });
@@ -347,7 +368,18 @@ export function UsageRouteScreen() {
                     metric={metric}
                     environmentLabels={environmentLabels}
                   />
-                  <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
+                  <TotalsSection
+                    merged={merged}
+                    isPast24Hours={isPast24Hours}
+                    projectedTokens={
+                      monthUsage.isPending ||
+                      !monthUsage.selectedEnvironments.some(
+                        (environment) => environment.summary !== null,
+                      )
+                        ? null
+                        : projectMonthEndTokens(monthTokens, monthSelection.asOf)
+                    }
+                  />
                   <ModelsSection merged={merged} />
                 </>
               )}
@@ -488,7 +520,11 @@ function ProviderSection(props: {
   );
 }
 
-function TotalsSection(props: { readonly merged: MergedUsage; readonly isPast24Hours: boolean }) {
+function TotalsSection(props: {
+  readonly merged: MergedUsage;
+  readonly isPast24Hours: boolean;
+  readonly projectedTokens: number | null;
+}) {
   const { merged } = props;
   const activePeriods = (props.isPast24Hours ? merged.hourly : merged.daily).filter(
     (period) => period.totalTokens > 0,
@@ -500,6 +536,13 @@ function TotalsSection(props: { readonly merged: MergedUsage; readonly isPast24H
   return (
     <SettingsSection title="Totals">
       <View className="flex-row flex-wrap">
+        {props.projectedTokens !== null ? (
+          <MetricCell
+            label="Projected month-end tokens"
+            value={formatTokens(props.projectedTokens)}
+            detail="At this month's daily pace"
+          />
+        ) : null}
         <MetricCell
           label="Processed tokens"
           value={formatTokens(merged.totalTokens)}
