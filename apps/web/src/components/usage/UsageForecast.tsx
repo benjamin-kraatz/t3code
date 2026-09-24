@@ -154,7 +154,7 @@ export function UsageForecast({
                     >
                       <span className="min-w-0 overflow-hidden whitespace-nowrap py-px">
                         <span
-                          className="ms-1.5 inline-block rounded-full px-1.5 text-[11px] font-medium leading-4 translate-x-1 opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-chip:translate-x-0 group-hover/forecast-chip:opacity-100 group-hover/forecast-chip:blur-none"
+                          className="ms-1.5 inline-block rounded-full px-1.5 text-2xs font-medium leading-4 translate-x-1 opacity-0 blur-2xs transition-[opacity,translate,filter] duration-300 ease-out motion-reduce:transition-none group-hover/forecast-chip:translate-x-0 group-hover/forecast-chip:opacity-100 group-hover/forecast-chip:blur-none"
                           style={{
                             color,
                             backgroundColor: `color-mix(in oklab, ${color} 14%, transparent)`,

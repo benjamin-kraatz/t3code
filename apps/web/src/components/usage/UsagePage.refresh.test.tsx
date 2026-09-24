@@ -47,6 +47,11 @@ vi.mock("./usagePagePreferences", () => ({
   readUsagePagePreferences: () => ({ metric: state.metric, windowDays: 30 }),
   saveUsagePagePreferences: vi.fn(),
 }));
+vi.mock("./usePaceWarning", () => ({
+  usePaceWarnings: () => [],
+  usePaceWarningEnabled: () => true,
+  setPaceWarningEnabled: vi.fn(),
+}));
 vi.mock("../ui/button", () => ({ Button: "button", InlineButton: "button" }));
 vi.mock("../ui/scroll-area", () => ({ ScrollArea: "div" }));
 vi.mock("../ui/select", () => ({
