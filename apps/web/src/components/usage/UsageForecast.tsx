@@ -140,7 +140,7 @@ export function UsageForecast({
                   >
                     {format(value)}
                   </span>
-                  <span className="translate-y-1 text-end opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-200 motion-reduce:transition-none group-hover/forecast-row:translate-y-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-0">
+                  <span className="translate-y-1 text-end opacity-0 blur-[2px] transition-[opacity,translate,filter] duration-200 motion-reduce:transition-none group-hover/forecast-row:translate-y-0 group-hover/forecast-row:opacity-100 group-hover/forecast-row:blur-none">
                     <span className="sr-only">{format(providerSoFar)} so far, </span>
                     <span aria-hidden>{format(providerSoFar)}</span>
                   </span>
