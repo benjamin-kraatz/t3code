@@ -49,6 +49,7 @@ import {
   WorkspaceConnectionTitle,
 } from "../home/WorkspaceConnectionTitle";
 import { SidebarHeaderActions } from "./sidebar-header-actions";
+import { useHasPaceWarning } from "../usage/usePaceWarning";
 import { MaterialThreadListToolbar } from "../home/MaterialThreadListToolbar";
 import { useMaterialToolbarHeight } from "../../components/useMaterialToolbarHeight";
 import { useMaterialFabScroll } from "../home/MaterialFabScrollContext";
@@ -133,6 +134,7 @@ function ThreadNavigationSidebarPane(
   const drawerColor = materialTheme["--color-drawer"];
 
   const insets = useSafeAreaInsets();
+  const hasPaceWarning = useHasPaceWarning();
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
@@ -879,8 +881,9 @@ function ThreadNavigationSidebarPane(
         filterIcon,
         filterMenu,
         onOpenSettings: props.onOpenSettings,
+        hasPaceWarning,
       }),
-    [filterIcon, filterMenu, props.onOpenSettings],
+    [filterIcon, filterMenu, hasPaceWarning, props.onOpenSettings],
   );
   // Snoozed threads need no special case: the shelf header is a list row
   // even while collapsed.
@@ -1083,7 +1086,10 @@ function ThreadNavigationSidebarPane(
               <ControlPillMenu actions={listMenuActions} onPressAction={handleListMenuAction}>
                 <SidebarFilterButton accessibilityLabel="Filter threads" icon={filterIcon} />
               </ControlPillMenu>
-              <SidebarHeaderActions onOpenSettings={props.onOpenSettings} />
+              <SidebarHeaderActions
+                onOpenSettings={props.onOpenSettings}
+                hasPaceWarning={hasPaceWarning}
+              />
             </View>
           </View>
 

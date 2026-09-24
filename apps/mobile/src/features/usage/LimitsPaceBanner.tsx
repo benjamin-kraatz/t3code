@@ -1,27 +1,18 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
-import { collectLimitAccounts, collectLimitPools } from "@t3tools/shared/usageLimits";
-import { AsyncResult } from "effect/unstable/reactivity";
 import { memo } from "react";
 import { Pressable, View } from "react-native";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { environmentPresentations } from "../../state/presentation";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { updateMobilePreferencesAtom } from "../../state/preferences";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { SettingsSwitchRow } from "../settings/components/SettingsSwitchRow";
 import { paceText } from "./UsageLimitsSection";
+import { paceWarnings, usePaceWarningEnabled } from "./usePaceWarning";
 
 const DRIVER_LABEL: Partial<Record<string, string>> = { codex: "Codex", claudeAgent: "Claude" };
-
-/** On unless the user turned it off; still on while preferences load. */
-function usePaceWarningEnabled() {
-  const preferences = useAtomValue(mobilePreferencesAtom);
-  return !(
-    AsyncResult.isSuccess(preferences) && preferences.value.limitsPaceWarningEnabled === false
-  );
-}
 
 /**
  * A home-screen nudge when any pooled limit runs ahead of pace, worst first.
@@ -34,13 +25,7 @@ export const LimitsPaceBanner = memo(function LimitsPaceBanner({ now }: { readon
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const enabled = usePaceWarningEnabled();
   if (!enabled) return null;
-  const behind = collectLimitPools(collectLimitAccounts(presentations), now)
-    .flatMap((pool) =>
-      pool.windows
-        .filter((window) => window.pace === "ahead")
-        .map((window) => ({ driver: pool.driver, window })),
-    )
-    .sort((left, right) => (right.window.paceGapPercent ?? 0) - (left.window.paceGapPercent ?? 0));
+  const behind = paceWarnings(presentations, now);
   const worst = behind[0];
   if (!worst) return null;
   const provider = DRIVER_LABEL[worst.driver] ?? String(worst.driver);

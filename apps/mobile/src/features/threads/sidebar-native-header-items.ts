@@ -40,6 +40,7 @@ export function createSidebarHeaderItems(input: {
   readonly filterIcon: string;
   readonly filterMenu: HomeListFilterMenu;
   readonly onOpenSettings: () => void;
+  readonly hasPaceWarning: boolean;
 }): NativeStackHeaderItem[] {
   return [
     withNativeGlassHeaderItem({
@@ -55,8 +56,9 @@ export function createSidebarHeaderItems(input: {
     withNativeGlassHeaderItem({
       type: "button",
       label: "",
-      accessibilityLabel: "Open settings",
+      accessibilityLabel: input.hasPaceWarning ? "Open settings, usage warning" : "Open settings",
       icon: sfSymbolIcon("gearshape"),
+      badge: input.hasPaceWarning ? { value: "" } : undefined,
       onPress: input.onOpenSettings,
     }),
   ];

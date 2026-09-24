@@ -7,11 +7,13 @@ import { SymbolView } from "../../../components/AppSymbol";
 import { AppText as Text } from "../../../components/AppText";
 import type { SettingsLegalDocumentTarget, SettingsSheetTarget } from "./settings-sheet-targets";
 import { cn } from "../../../lib/cn";
+import { PaceWarningDot } from "../../usage/PaceWarningDot";
 
 type SymbolName = ComponentProps<typeof SymbolView>["name"];
 
 export function SettingsRow(props: {
   readonly disabled?: boolean;
+  readonly badge?: boolean;
   readonly icon: SymbolName;
   readonly label: string;
   readonly value?: string;
@@ -27,11 +29,16 @@ export function SettingsRow(props: {
         className="bg-grouped-card"
         title={props.label}
         subtitle={props.valuePosition === "trailing" ? undefined : props.value}
-        accessibilityLabel={[props.label, props.value].filter(Boolean).join(", ")}
+        accessibilityLabel={[props.label, props.value, props.badge ? "warning" : null]
+          .filter(Boolean)
+          .join(", ")}
         trailing={
-          props.valuePosition === "trailing" && props.value ? (
+          props.badge || (props.valuePosition === "trailing" && props.value) ? (
             <View className="flex-row items-center gap-3">
-              <Text className="text-sm text-foreground-muted">{props.value}</Text>
+              {props.valuePosition === "trailing" && props.value ? (
+                <Text className="text-sm text-foreground-muted">{props.value}</Text>
+              ) : null}
+              {props.badge ? <PaceWarningDot /> : null}
               <SymbolView name="chevron.right" size={16} tintColorClassName="accent-chevron" />
             </View>
           ) : undefined
@@ -83,6 +90,7 @@ export function SettingsRow(props: {
           ) : null}
         </View>
       </>
+      {props.badge ? <PaceWarningDot /> : null}
       <SymbolView
         name="chevron.right"
         size={16}
@@ -97,7 +105,7 @@ export function SettingsRow(props: {
   if (target) {
     return (
       <Pressable
-        accessibilityLabel={props.label}
+        accessibilityLabel={props.badge ? `${props.label}, warning` : props.label}
         accessibilityRole="button"
         disabled={props.disabled}
         onPress={() =>

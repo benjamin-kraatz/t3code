@@ -13,6 +13,8 @@ import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands
 import { WorkspaceConnectionTitle } from "./WorkspaceConnectionTitle";
 import { useWorkspaceState } from "../../state/workspace";
 import { useMaterialToolbarHeight } from "../../components/useMaterialToolbarHeight";
+import { PaceWarningDot } from "../usage/PaceWarningDot";
+import { useHasPaceWarning } from "../usage/usePaceWarning";
 
 /** One toolbar height for the compact list and expanded sidebar, including search. */
 export function MaterialThreadListToolbar(props: {
@@ -30,6 +32,7 @@ export function MaterialThreadListToolbar(props: {
   const insets = useSafeAreaInsets();
   const toolbarHeight = useMaterialToolbarHeight();
   const { state } = useWorkspaceState();
+  const hasPaceWarning = useHasPaceWarning();
   const { onRequestVisibility, onSearchQueryChange } = props;
   const searchRef = useRef<TextInput>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -107,11 +110,20 @@ export function MaterialThreadListToolbar(props: {
                 icon="magnifyingglass"
                 onPress={openSearch}
               />
-              <AndroidHeaderIconButton
-                accessibilityLabel="Open settings"
-                icon="gearshape"
-                onPress={props.onOpenSettings}
-              />
+              <View>
+                <AndroidHeaderIconButton
+                  accessibilityLabel={
+                    hasPaceWarning ? "Open settings, usage warning" : "Open settings"
+                  }
+                  icon="gearshape"
+                  onPress={props.onOpenSettings}
+                />
+                {hasPaceWarning ? (
+                  <View pointerEvents="none" className="absolute top-1.5 right-1.5">
+                    <PaceWarningDot />
+                  </View>
+                ) : null}
+              </View>
             </>
           )}
         </View>

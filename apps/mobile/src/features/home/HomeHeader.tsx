@@ -9,6 +9,7 @@ import {
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
 } from "../layout/native-mail-search-toolbar";
 import { buildHomeListFilterMenu } from "./home-list-filter-menu";
+import { useHasPaceWarning } from "../usage/usePaceWarning";
 import type { HomeHeaderProps } from "./HomeHeader.types";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
@@ -16,6 +17,7 @@ export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 export function HomeHeader(props: HomeHeaderProps) {
   const searchBarRef = useRef<SearchBarCommands>(null);
   const iconColor = useUniwindTheme()["--color-icon"];
+  const hasPaceWarning = useHasPaceWarning();
   // The list uses a fixed creation order and ignores sort/group options, so
   // the filter menu only carries the filters and the "customized" icon state
   // keys off those alone.
@@ -31,16 +33,17 @@ export function HomeHeader(props: HomeHeaderProps) {
   return (
     <>
       <NativeStackScreenOptions
-        optionsVersion={filterMenu.items}
+        optionsVersion={[filterMenu.items, hasPaceWarning]}
         options={{
           // Static header config (glass, title, fonts) lives in Stack.tsx
           // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
           headerTintColor: iconColor,
           unstable_headerRightItems: () => [
             withNativeGlassHeaderItem({
-              accessibilityLabel: "Open settings",
+              accessibilityLabel: hasPaceWarning ? "Open settings, usage warning" : "Open settings",
               icon: { name: "ellipsis", type: "sfSymbol" } as const,
               identifier: "home-settings",
+              badge: hasPaceWarning ? { value: "" } : undefined,
               label: "",
               onPress: props.onOpenSettings,
               type: "button",
