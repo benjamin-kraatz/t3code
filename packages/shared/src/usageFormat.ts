@@ -263,12 +263,27 @@ export function makeMonthToDateWindow(now = new Date()): UsageSummaryInput {
   };
 }
 
-/** Extends the observed month-to-date rate through the last day of the month. */
-export function projectMonthEndValue(value: number, now = new Date()): number {
+/**
+ * How far the current month has run, in the usage day calendar. `elapsedShare`
+ * counts today as a full day so the forecast bar and the projection agree.
+ */
+export function monthProgress(now = new Date()): {
+  readonly dayOfMonth: number;
+  readonly daysInMonth: number;
+  readonly elapsedShare: number;
+} {
   const day = makeMonthToDateWindow(now).untilDay;
   const [year, month, dayOfMonth] = day.split("-").map(Number);
-  if (year === undefined || month === undefined || dayOfMonth === undefined) return value;
+  if (year === undefined || month === undefined || dayOfMonth === undefined) {
+    return { dayOfMonth: 1, daysInMonth: 1, elapsedShare: 1 };
+  }
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return { dayOfMonth, daysInMonth, elapsedShare: dayOfMonth / daysInMonth };
+}
+
+/** Extends the observed month-to-date rate through the last day of the month. */
+export function projectMonthEndValue(value: number, now = new Date()): number {
+  const { dayOfMonth, daysInMonth } = monthProgress(now);
   return (value * daysInMonth) / dayOfMonth;
 }
 

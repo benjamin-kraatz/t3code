@@ -1,5 +1,5 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
-import { EnvironmentId, USAGE_CONTRACT_VERSION, type UsageProviderKind } from "@t3tools/contracts";
+import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import {
   isCompatibleUsageContractVersion,
@@ -18,9 +18,6 @@ import {
   formatUsd,
   makeMonthToDateWindow,
   makeWindow,
-  projectMonthEndProviders,
-  projectMonthEndTokens,
-  projectMonthEndValue,
 } from "@t3tools/shared/usageFormat";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
@@ -34,6 +31,7 @@ import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
+import { UsageForecastCard } from "./UsageForecastCard";
 import { UsageProjectsSection } from "./UsageProjectsSection";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
@@ -113,12 +111,9 @@ export function UsageRouteScreen() {
   const monthPeriods = monthUsage.merged.daily.filter(
     (period) => period.day >= monthSelection.window.sinceDay,
   );
-  const monthTokens = monthPeriods.reduce((total, period) => total + period.totalTokens, 0);
-  const monthCostUsd = monthPeriods.reduce((total, period) => total + period.costUsd, 0);
-  const hasMonthUsage =
-    !monthUsage.isPending &&
-    monthUsage.selectedEnvironments.some((environment) => environment.summary !== null);
-  const projectedProviders = projectMonthEndProviders(monthPeriods, monthSelection.asOf);
+  const hasMonthUsage = monthUsage.selectedEnvironments.some(
+    (environment) => environment.summary !== null,
+  );
   const environmentLabels = useMemo(
     () =>
       new Map(environments.map((environment) => [environment.environmentId, environment.label])),
@@ -370,27 +365,21 @@ export function UsageRouteScreen() {
                     isPast24Hours={isPast24Hours}
                     timeZone={window.timeZone}
                   />
-                  <ProviderSection
-                    merged={merged}
-                    metric={metric}
-                    hasMonthUsage={hasMonthUsage}
-                    projectedProviders={projectedProviders}
-                  />
+                  {monthUsage.isPending || hasMonthUsage ? (
+                    <UsageForecastCard
+                      metric={metric}
+                      monthPeriods={monthPeriods}
+                      asOf={monthSelection.asOf}
+                      pending={monthUsage.isPending}
+                    />
+                  ) : null}
+                  <ProviderSection merged={merged} metric={metric} />
                   <UsageProjectsSection
                     merged={merged}
                     metric={metric}
                     environmentLabels={environmentLabels}
                   />
-                  <TotalsSection
-                    merged={merged}
-                    isPast24Hours={isPast24Hours}
-                    projectedTokens={
-                      hasMonthUsage ? projectMonthEndTokens(monthTokens, monthSelection.asOf) : null
-                    }
-                    projectedCostUsd={
-                      hasMonthUsage ? projectMonthEndValue(monthCostUsd, monthSelection.asOf) : null
-                    }
-                  />
+                  <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
                   <ModelsSection merged={merged} />
                 </>
               )}
@@ -478,11 +467,6 @@ function ChartCard(props: {
 function ProviderSection(props: {
   readonly merged: MergedUsage;
   readonly metric: UsageChartMetric;
-  readonly hasMonthUsage: boolean;
-  readonly projectedProviders: ReadonlyMap<
-    UsageProviderKind,
-    { readonly totalTokens: number; readonly costUsd: number }
-  >;
 }) {
   const { merged, metric } = props;
   const colors = useProviderColors();
@@ -492,24 +476,21 @@ function ProviderSection(props: {
 
   // Ranked by whatever the toggle is showing, so the rows always descend.
   // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023 method.
-  const ordered = PROVIDER_ORDER.filter(
-    (provider) =>
-      currentProviders.has(provider) ||
-      (props.hasMonthUsage && props.projectedProviders.has(provider)),
-  ).sort((a, b) => {
-    const first = currentProviders.get(a);
-    const second = currentProviders.get(b);
-    return metric === "cost"
-      ? (second?.costUsd ?? 0) - (first?.costUsd ?? 0)
-      : (second?.totalTokens ?? 0) - (first?.totalTokens ?? 0);
-  });
+  const ordered = PROVIDER_ORDER.filter((provider) => currentProviders.has(provider)).sort(
+    (a, b) => {
+      const first = currentProviders.get(a);
+      const second = currentProviders.get(b);
+      return metric === "cost"
+        ? (second?.costUsd ?? 0) - (first?.costUsd ?? 0)
+        : (second?.totalTokens ?? 0) - (first?.totalTokens ?? 0);
+    },
+  );
   if (ordered.length === 0) return null;
 
   return (
     <SettingsSection title="Providers">
       {ordered.map((provider, index) => {
         const current = currentProviders.get(provider);
-        const projected = props.hasMonthUsage ? props.projectedProviders.get(provider) : undefined;
         const share = metric === "cost" ? (current?.costShare ?? 0) : (current?.tokenShare ?? 0);
         return (
           <View
@@ -542,12 +523,6 @@ function ProviderSection(props: {
                 ? `${formatPercent(share)} of cost · ${formatTokens(current?.totalTokens ?? 0)} tokens`
                 : `${formatPercent(share)} of tokens · ${formatUsd(current?.costUsd ?? 0)}`}
             </Text>
-            {projected ? (
-              <Text className="text-sm text-foreground-muted">
-                Projected month end · {formatTokens(projected.totalTokens)} tokens ·{" "}
-                {formatUsd(projected.costUsd)} API cost
-              </Text>
-            ) : null}
           </View>
         );
       })}
@@ -555,12 +530,7 @@ function ProviderSection(props: {
   );
 }
 
-function TotalsSection(props: {
-  readonly merged: MergedUsage;
-  readonly isPast24Hours: boolean;
-  readonly projectedTokens: number | null;
-  readonly projectedCostUsd: number | null;
-}) {
+function TotalsSection(props: { readonly merged: MergedUsage; readonly isPast24Hours: boolean }) {
   const { merged } = props;
   const activePeriods = (props.isPast24Hours ? merged.hourly : merged.daily).filter(
     (period) => period.totalTokens > 0,
@@ -572,20 +542,6 @@ function TotalsSection(props: {
   return (
     <SettingsSection title="Totals">
       <View className="flex-row flex-wrap">
-        {props.projectedTokens !== null ? (
-          <MetricCell
-            label="Projected month-end tokens"
-            value={formatTokens(props.projectedTokens)}
-            detail="At this month's daily pace"
-          />
-        ) : null}
-        {props.projectedCostUsd !== null ? (
-          <MetricCell
-            label="Projected month-end API cost"
-            value={formatUsd(props.projectedCostUsd)}
-            detail="At this month's daily pace"
-          />
-        ) : null}
         <MetricCell
           label="Processed tokens"
           value={formatTokens(merged.totalTokens)}

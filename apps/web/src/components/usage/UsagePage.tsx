@@ -39,9 +39,6 @@ import {
   formatUsd,
   makeMonthToDateWindow,
   makeWindow,
-  projectMonthEndProviders,
-  projectMonthEndTokens,
-  projectMonthEndValue,
 } from "@t3tools/shared/usageFormat";
 import { Button, InlineButton } from "../ui/button";
 import {
@@ -64,6 +61,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { UsageForecast, UsageForecastSkeleton } from "./UsageForecast";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
@@ -135,12 +133,9 @@ export function UsagePage() {
   const monthPeriods = monthUsage.merged.daily.filter(
     (period) => period.day >= monthSelection.window.sinceDay,
   );
-  const monthTokens = monthPeriods.reduce((total, period) => total + period.totalTokens, 0);
-  const monthCostUsd = monthPeriods.reduce((total, period) => total + period.costUsd, 0);
-  const hasMonthUsage =
-    !monthUsage.isPending &&
-    monthUsage.selectedEnvironments.some((environment) => environment.summary !== null);
-  const projectedProviders = projectMonthEndProviders(monthPeriods, monthSelection.asOf);
+  const hasMonthUsage = monthUsage.selectedEnvironments.some(
+    (environment) => environment.summary !== null,
+  );
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const sourceMessages = [
     ...new Set(
@@ -186,10 +181,6 @@ export function UsagePage() {
     [breakdown, merged.models, metric],
   );
   const activeProviders = useMemo(() => providersWithUsage(merged.providers), [merged.providers]);
-  const providerRows = PROVIDER_ORDER.filter(
-    (provider) =>
-      activeProviders.includes(provider) || (hasMonthUsage && projectedProviders.has(provider)),
-  );
   const timeValueColumnWidth = `${60 / (activeProviders.length + 2)}%`;
 
   const selectWindow = (days: number) => {
@@ -471,11 +462,8 @@ export function UsagePage() {
                       </span>
                     </div>
 
-                    {providerRows.map((provider) => {
+                    {activeProviders.map((provider) => {
                       const totals = merged.providers.find((entry) => entry.provider === provider);
-                      const projected = hasMonthUsage
-                        ? projectedProviders.get(provider)
-                        : undefined;
                       const share =
                         metric === "cost" ? (totals?.costShare ?? 0) : (totals?.tokenShare ?? 0);
                       const providerSessions = totals?.sessions ?? 0;
@@ -514,12 +502,6 @@ export function UsagePage() {
                               ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
                               : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`}
                           </span>
-                          {projected ? (
-                            <span className="text-xs text-muted-foreground tabular-nums">
-                              Projected month end · {formatTokens(projected.totalTokens)} tokens ·{" "}
-                              {formatUsd(projected.costUsd)} API cost
-                            </span>
-                          ) : null}
                         </div>
                       );
                     })}
@@ -544,23 +526,19 @@ export function UsagePage() {
                   </div>
                 </section>
 
+                {monthUsage.isPending ? (
+                  <UsageForecastSkeleton />
+                ) : hasMonthUsage ? (
+                  <UsageForecast
+                    metric={metric}
+                    monthPeriods={monthPeriods}
+                    asOf={monthSelection.asOf}
+                  />
+                ) : null}
+
                 <section className="flex flex-col gap-2">
                   <h2 className="text-sm font-medium text-foreground">Totals</h2>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
-                    {hasMonthUsage ? (
-                      <>
-                        <Metric
-                          label="Projected month-end tokens"
-                          value={formatTokens(
-                            projectMonthEndTokens(monthTokens, monthSelection.asOf),
-                          )}
-                        />
-                        <Metric
-                          label="Projected month-end API cost"
-                          value={formatUsd(projectMonthEndValue(monthCostUsd, monthSelection.asOf))}
-                        />
-                      </>
-                    ) : null}
                     <Metric label="Processed tokens" value={formatTokens(merged.totalTokens)} />
                     <Metric label="Cached input" value={formatTokens(merged.cachedInputTokens)} />
                     <Metric
@@ -979,6 +957,8 @@ function UsageSkeleton() {
           </div>
         </div>
       </section>
+
+      <UsageForecastSkeleton />
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-foreground">Totals</h2>

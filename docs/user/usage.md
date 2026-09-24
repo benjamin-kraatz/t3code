@@ -6,12 +6,13 @@
 environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
 cost. These estimates are not your subscription bill.
 
-**Projected month-end tokens** and **Projected month-end API cost** extend this month's usage at
-the average daily pace so far. The cost is an API-equivalent estimate and excludes unpriced
-records; it is not your subscription bill. Both projections use the selected environments and
-remain rough estimates, especially early in the month or when an environment has incomplete
-history. The period control still applies to the other usage totals and charts.
-Provider rows show the same month-end token and API cost projections for each provider.
+**This month** projects where the calendar month lands if the average daily pace so far holds.
+It follows the cost or tokens metric and the selected environments but ignores the period control,
+which still applies to every other total and chart. The bar is the month: the filled part is how
+much of it has passed, split by provider, and the empty tail is what the same pace adds by the last
+day. The cost is an API-equivalent estimate that excludes unpriced records; it is not your
+subscription bill. Early in the month, or when an environment has incomplete history, treat the
+figure as rough.
 
 On mobile, **By project** splits the same totals by the folder each session ran in. Folders that
 aren't T3 projects appear as **Outside T3**. Antigravity, Cursor, and history from older servers
