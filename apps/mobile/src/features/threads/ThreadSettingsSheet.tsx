@@ -946,6 +946,7 @@ function ThreadSettingsChoiceContent(props: {
           rows: RUNTIME_MODE_CHOICES.map((choice) => ({
             id: choice.mode,
             label: choice.label,
+            isDefault: false,
             description: choice.description,
             selected: choice.mode === session.runtimeMode,
             onPress: () => {
@@ -960,6 +961,7 @@ function ThreadSettingsChoiceContent(props: {
             rows: selectableChoices(activeDescriptor).map((choice) => ({
               id: choice.id,
               label: choice.label,
+              isDefault: choice.isDefault === true,
               description: undefined,
               selected: choice.id === getProviderOptionCurrentValue(activeDescriptor),
               onPress: () => {
@@ -996,6 +998,7 @@ function ThreadSettingsChoiceContent(props: {
           <ChoiceRow
             key={row.id}
             description={row.description}
+            isDefault={row.isDefault}
             isLast={index === submenuContent.rows.length - 1}
             label={row.label}
             selected={row.selected}

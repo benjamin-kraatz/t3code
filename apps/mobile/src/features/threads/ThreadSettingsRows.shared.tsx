@@ -19,6 +19,7 @@ export type ModelRowProps = {
 export type ChoiceRowProps = {
   readonly label: string;
   readonly description?: string;
+  readonly isDefault?: boolean;
   readonly selected: boolean;
   readonly onPress: () => void;
   readonly isLast: boolean;
@@ -117,7 +118,9 @@ export function ModelRowContent(
 export function ChoiceRowContent(props: ChoiceRowProps & RowSelectionProps) {
   return (
     <Pressable
-      accessibilityLabel={props.description ? `${props.label}. ${props.description}` : props.label}
+      accessibilityLabel={[props.label, props.isDefault ? "Default" : null, props.description]
+        .filter(Boolean)
+        .join(". ")}
       accessibilityRole="radio"
       accessibilityState={{ checked: props.selected }}
       onPress={props.onPress}
@@ -129,7 +132,16 @@ export function ChoiceRowContent(props: ChoiceRowProps & RowSelectionProps) {
     >
       {props.leadingSelection}
       <View className="min-w-0 flex-1 gap-0.5">
-        <Text className="text-base font-t3-medium text-foreground">{props.label}</Text>
+        <View className="flex-row items-center gap-2">
+          <Text className="min-w-0 shrink text-base font-t3-medium text-foreground">
+            {props.label}
+          </Text>
+          {props.isDefault ? (
+            <View className="rounded-md bg-subtle-strong px-1.5 py-0.5">
+              <Text className="text-3xs font-t3-bold text-foreground-muted">Default</Text>
+            </View>
+          ) : null}
+        </View>
         {props.description ? (
           <Text className="text-sm leading-5 text-foreground-muted">{props.description}</Text>
         ) : null}
