@@ -1,18 +1,103 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { MergedUsage, ProjectTotals } from "@t3tools/shared/usageMerge";
 import { formatPercent, formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
+import * as Haptics from "expo-haptics";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
+import Animated, { FadeInDown, FadeOutUp, ReduceMotion } from "react-native-reanimated";
 
 import { AppText as Text } from "../../components/AppText";
+import { ControlPillMenu } from "../../components/ControlPill";
+import { RowPressable } from "../../components/RowPressable";
+import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import type { UsageChartMetric } from "./usageChartData";
 
 /** Past this many rows the long tail of scratch directories sits behind a toggle. */
 const COLLAPSED_PROJECT_COUNT = 8;
 
+const PATH_MENU_ACTIONS = [{ id: "copy-path", title: "Copy path", image: "doc.on.doc" }];
+
+const SUBTITLE_ENTERING = FadeInDown.duration(220).reduceMotion(ReduceMotion.System);
+const SUBTITLE_EXITING = FadeOutUp.duration(160).reduceMotion(ReduceMotion.System);
+
 function isCostUnknown(project: ProjectTotals): boolean {
   return project.records > 0 && project.unpricedRecords >= project.records;
+}
+
+/**
+ * One project line. A tap swaps the subtitle between totals and the absolute
+ * path, sliding the outgoing line up as the next one rises in; a long press
+ * offers to copy the path. Rows without a path stay static.
+ */
+function ProjectRow(props: {
+  readonly project: ProjectTotals;
+  readonly first: boolean;
+  readonly title: string;
+  readonly detail: string;
+  readonly value: string;
+}) {
+  const { path } = props.project;
+  const [showingPath, setShowingPath] = useState(false);
+  const subtitle = showingPath && path !== null ? path : props.detail;
+  const content = (
+    <View
+      className={
+        props.first
+          ? "flex-row items-center gap-3 p-4"
+          : "flex-row items-center gap-3 border-t border-border-subtle p-4"
+      }
+    >
+      <View className="min-w-0 flex-1 gap-0.5">
+        <Text className="text-base text-foreground" numberOfLines={1}>
+          {props.title}
+        </Text>
+        {/* The invisible line holds the height; the visible one animates over it. */}
+        <View>
+          <Text className="text-sm opacity-0" numberOfLines={1} aria-hidden>
+            {" "}
+          </Text>
+          <Animated.View
+            key={showingPath ? "path" : "detail"}
+            entering={SUBTITLE_ENTERING}
+            exiting={SUBTITLE_EXITING}
+            className="absolute inset-x-0 top-0"
+          >
+            <Text
+              className="text-sm text-foreground-muted"
+              numberOfLines={1}
+              ellipsizeMode={showingPath ? "middle" : "tail"}
+            >
+              {subtitle}
+            </Text>
+          </Animated.View>
+        </View>
+      </View>
+      <Text className="text-base tabular-nums text-foreground">{props.value}</Text>
+    </View>
+  );
+  if (path === null) return content;
+  return (
+    <ControlPillMenu
+      actions={PATH_MENU_ACTIONS}
+      onPressAction={({ nativeEvent }) => {
+        if (nativeEvent.event === "copy-path") copyTextWithHaptic(path, { target: "project path" });
+      }}
+      shouldOpenOnLongPress
+    >
+      <RowPressable
+        accessibilityRole="button"
+        accessibilityLabel={`${props.title}, ${subtitle}, ${props.value}`}
+        accessibilityHint={showingPath ? "Shows usage details" : "Shows the project path"}
+        onPress={() => {
+          void Haptics.selectionAsync().catch(() => undefined);
+          setShowingPath((value) => !value);
+        }}
+      >
+        {content}
+      </RowPressable>
+    </ControlPillMenu>
+  );
 }
 
 /**
@@ -63,30 +148,20 @@ export function UsageProjectsSection(props: {
               : `${formatPercent(share)} of cost · ${formatTokens(project.totalTokens)} tokens`
             : `${formatPercent(share)} of tokens · ${costUnknown ? "unpriced" : formatUsd(project.costUsd)}`;
         return (
-          <View
+          <ProjectRow
             key={project.key}
-            className={
-              index === 0
-                ? "flex-row items-center gap-3 p-4"
-                : "flex-row items-center gap-3 border-t border-border-subtle p-4"
-            }
-          >
-            <View className="min-w-0 flex-1 gap-0.5">
-              <Text className="text-base text-foreground" numberOfLines={1}>
-                {project.title}
-              </Text>
-              <Text className="text-sm text-foreground-muted" numberOfLines={1}>
-                {qualifier === null ? detail : `${qualifier} · ${detail}`}
-              </Text>
-            </View>
-            <Text className="text-base tabular-nums text-foreground">
-              {metric === "tokens"
+            project={project}
+            first={index === 0}
+            title={project.title}
+            detail={qualifier === null ? detail : `${qualifier} · ${detail}`}
+            value={
+              metric === "tokens"
                 ? formatTokens(project.totalTokens)
                 : costUnknown
                   ? "Unpriced"
-                  : formatUsd(project.costUsd)}
-            </Text>
-          </View>
+                  : formatUsd(project.costUsd)
+            }
+          />
         );
       })}
       {collapsible ? (
